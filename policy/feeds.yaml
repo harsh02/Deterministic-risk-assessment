@@ -1,0 +1,61 @@
+# ─────────────────────────────────────────────────────────────
+# DetRisk  ·  Threat-Intel Feed Registry
+# ─────────────────────────────────────────────────────────────
+# Add or remove feeds here — no code changes required.
+# Paths are relative to the repository root.
+#
+# Supported decompress values: "zip", "gzip", or omit for raw.
+# ─────────────────────────────────────────────────────────────
+
+settings:
+  max_workers: 4              # concurrent download threads
+  retry_attempts: 3           # per-feed retry count
+  retry_backoff_base: 2.0     # exponential backoff multiplier (1s, 2s, 4s …)
+  request_timeout: 90         # seconds per HTTP request
+  user_agent: "detrisk-sync/1.0 (+https://github.com/)"
+
+feeds:
+  nvd:
+    name: "NVD recent CVEs"
+    url: "https://nvd.nist.gov/feeds/json/cve/1.1/nvdcve-1.1-recent.json.zip"
+    destination: "data/nvdcve-1.1-recent.json"
+    max_bytes: 33554432              # 32 MB  (compressed)
+    decompress: "zip"
+    extract_name: "nvdcve-1.1-recent.json"
+    max_unpacked_bytes: 134217728    # 128 MB
+    manual_guidance: >
+      Download 'nvdcve-1.1-recent.json.zip' from
+      https://nvd.nist.gov/feeds/json/cve/1.1/ and place the unpacked JSON
+      under data/ if automated access remains blocked.
+
+  kev:
+    name: "CISA Known Exploited Vulnerabilities"
+    url: "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
+    destination: "data/known_exploited_vulnerabilities.json"
+    max_bytes: 8388608               # 8 MB
+
+  epss:
+    name: "Exploit Prediction Scoring System (EPSS)"
+    url: "https://epss.cyentia.com/epss_scores-latest.csv.gz"
+    destination: "data/epss_scores-latest.csv"
+    max_bytes: 33554432              # 32 MB  (compressed)
+    decompress: "gzip"
+    max_unpacked_bytes: 67108864     # 64 MB
+    manual_guidance: >
+      Fetch 'epss_scores-latest.csv.gz' from
+      https://www.first.org/epss/data_stats and extract the CSV into data/
+      if the public endpoint denies automated requests.
+
+  # ── Add new feeds below ──────────────────────────────────
+  # my_feed:
+  #   name: "My Custom Feed"
+  #   url: "https://example.com/feed.json"
+  #   destination: "data/my_feed.json"
+  #   max_bytes: 10485760            # 10 MB
+
+mitre:
+  expected_path: "data/enterprise-attack.json"
+  guidance: >
+    MITRE ATT&CK bundle not found. Download the latest release from
+    https://github.com/mitre/cti/releases and place 'enterprise-attack.json'
+    under data/.

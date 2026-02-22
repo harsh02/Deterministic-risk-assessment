@@ -1,0 +1,284 @@
+# Industry Pack: ICS/OT/Embedded Systems
+# Target: Industrial Control Systems, SCADA, IoT, Embedded Devices
+
+meta:
+  version: 1.0
+  industry: "ICS/OT/Embedded"
+  description: >
+    Risk assessment tailored for Industrial Control Systems, SCADA, 
+    IoT devices, and embedded systems. Emphasizes safety impact,
+    availability, and physical consequences.
+  use_cases:
+    - "Manufacturing plant SCADA vulnerabilities"
+    - "Smart grid and energy infrastructure"
+    - "Building automation systems"
+    - "IoT device fleet management"
+    - "Medical device embedded controllers"
+  owners: ["ics-security@yourco"]
+
+# Inherit common databases + add ICS-specific sources
+sources:
+  file_paths:
+    # Common databases (inherited)
+    cve: "data/nvdcve-2.0-modified.json"
+    kev: "data/known_exploited_vulnerabilities.json"
+    attack_enterprise: "data/enterprise-attack.json"
+    epss: "data/epss_scores-2025-10-02.csv.gz"
+    
+    # ICS-specific databases
+    ics_attack: "data/ics-attack.json"              # MITRE ATT&CK for ICS
+    emb3d: "data/emb3d-stix-2.0.1.json"            # Embedded device security
+    ics_advisories: "data/ics-cert-advisories.json" # ICS-CERT advisories
+    cwe_hardware: "data/cwe-hardware.json"          # Hardware weaknesses (CWE-1000)
+    
+  vector_indices:
+    cve_idx: "indexes/cve.faiss"
+    kev_idx: "indexes/kev.faiss"
+    attack_idx: "indexes/attack.faiss"
+    ics_attack_idx: "indexes/ics-attack.faiss"
+    emb3d_idx: "indexes/emb3d.faiss"
+
+# ICS-specific feature extraction
+features:
+  # Standard features (lower weights for ICS context)
+  - name: CVSS_BaseScore
+    from: ["cve"]
+    field: "cvss.baseScore"
+    default: 0
+    comment: "CVSS often underestimates ICS/OT impact"
+  
+  - name: CVSS_Exploitability
+    from: ["cve"]
+    field: "cvss.exploitabilityScore"
+    default: 0
+    weight_adjustment: 0.8  # Reduce by 20% (ICS exploits often harder but more damaging)
+  
+  - name: KnownExploited
+    from: ["kev"]
+    default: 0
+    weight_adjustment: 1.2  # Increase by 20% (ICS exploits are rarer but critical)
+  
+  - name: Attack_Frequency
+    from: ["attack_enterprise", "ics_attack"]
+    default: 0.4
+    comment: "Combined IT + ICS attack patterns"
+  
+  - name: EPSS_Score
+    from: ["epss"]
+    default: 0.05
+  
+  # ICS-specific features
+  - name: Safety_Impact
+    from: ["ics_advisories", "emb3d"]
+    description: "Physical safety consequences (injury, environmental damage)"
+    default: 0.0
+    enabled: true
+    mapping:
+      "critical_safety": 1.0      # Life safety risk
+      "moderate_safety": 0.6      # Equipment damage risk
+      "low_safety": 0.2           # Operational disruption only
+      "none": 0.0
+    comment: "Highest priority in ICS environments"
+  
+  - name: Availability_Impact
+    from: ["ics_advisories"]
+    description: "Impact on continuous operations and uptime"
+    default: 0.7  # Assume high (ICS prioritizes availability)
+    mapping:
+      "total_loss": 1.0           # Complete shutdown
+      "degraded": 0.6             # Reduced capacity
+      "intermittent": 0.3         # Sporadic issues
+      "none": 0.0
+  
+  - name: Physical_Process_Impact
+    from: ["ics_attack"]
+    description: "Manipulation of physical processes (pumps, valves, sensors)"
+    default: 0.0
+    mapping:
+      "process_manipulation": 1.0  # Direct control of physical systems
+      "sensor_spoofing": 0.8       # False readings
+      "denial_of_control": 0.6     # Loss of control
+      "monitoring_only": 0.2       # Information disclosure
+  
+  - name: Device_Maturity
+    from: ["emb3d"]
+    description: "Security maturity of embedded device/firmware"
+    default: 0.3  # Assume low maturity (legacy ICS common)
+    transform: "1 - maturity_level"
+    comment: "Many ICS devices lack modern security controls"
+  
+  - name: Network_Segmentation
+    from: ["internal_reports"]
+    description: "Is the ICS network properly segmented from IT?"
+    default: 0.5  # Assume partial segmentation
+    mapping:
+      "air_gapped": 0.0           # Physically isolated
+      "segmented": 0.3            # VLAN/firewall separation
+      "flat_network": 1.0         # Direct IT/OT connection
+    enabled: false  # Requires internal data
+  
+  - name: Legacy_System_Flag
+    from: ["emb3d", "ics_advisories"]
+    description: "Is this a legacy/EOL system that cannot be patched?"
+    default: 0.4  # Assume moderate legacy presence
+    mapping:
+      "eol_no_patches": 1.0       # End-of-life, vendor support ended
+      "limited_patches": 0.6      # Vendor provides critical patches only
+      "fully_supported": 0.2      # Active vendor support
+  
+  # Impact features
+  - name: Impact_Category
+    from: ["ics_attack"]
+    default: 0.8  # Higher default for ICS (physical consequences)
+  
+  - name: Data_Sensitivity
+    default: 0.4  # Lower priority in ICS (availability > confidentiality)
+  
+  - name: Impact_Scope
+    default: 0.7  # ICS issues often affect multiple systems
+
+# ICS-specific scoring formulas
+scoring:
+  likelihood:
+    formula: |
+      0.25*norm(CVSS_Exploitability,0,10) +
+      0.30*KnownExploited +
+      0.15*Attack_Frequency +
+      0.10*EPSS_Score +
+      0.10*Device_Maturity +
+      0.10*Legacy_System_Flag
+    clamp: [0, 1]
+    comment: "Emphasizes known exploits and device security posture"
+  
+  severity:
+    # ICS prioritizes: Safety > Availability > Integrity > Confidentiality
+    formula: |
+      0.40*Safety_Impact +
+      0.25*Availability_Impact +
+      0.15*Physical_Process_Impact +
+      0.10*norm(CVSS_BaseScore,0,10) +
+      0.10*Impact_Scope
+    clamp: [0, 1]
+    comment: "Safety impact is paramount in ICS environments"
+    
+    # Override for safety-critical scenarios
+    safety_critical_multiplier: 2.0
+    conditions:
+      - if: "Safety_Impact >= 0.8"
+        then: "severity = min(severity * 2.0, 1.0)"
+        note: "Safety-critical scenarios escalate to maximum severity"
+  
+  overall_risk:
+    method: "matrix"
+    matrix:
+      bins: [0.2, 0.4, 0.6, 0.8]
+      labels: ["Low", "Medium", "High", "Critical"]
+      # ICS risk matrix (more conservative - higher escalation)
+      table:
+        - ["Low",     "Medium",  "High",    "High",     "Critical"]
+        - ["Medium",  "High",    "High",    "Critical", "Critical"]
+        - ["High",    "High",    "Critical","Critical", "Critical"]
+        - ["High",    "Critical","Critical","Critical", "Critical"]
+        - ["Critical","Critical","Critical","Critical", "Critical"]
+
+# ICS-specific context
+context:
+  asset_criticality:
+    # Asset types common in ICS environments
+    "SCADA_Server": 1.0
+    "HMI": 0.9
+    "PLC": 0.95
+    "RTU": 0.85
+    "Safety_Instrumented_System": 1.0
+    "Historian": 0.7
+    "Engineering_Workstation": 0.8
+    "Field_Device": 0.6
+    "IoT_Sensor": 0.5
+  
+  protocol_risk:
+    # ICS protocols (many lack security)
+    "Modbus": 0.9       # No authentication
+    "DNP3": 0.8         # Limited security
+    "Profinet": 0.7
+    "EtherNet/IP": 0.7
+    "BACnet": 0.8
+    "OPC_UA": 0.4       # Modern, more secure
+  
+  vendor_support:
+    # Vendor patch availability affects risk
+    "active_support": 0.2
+    "limited_support": 0.6
+    "end_of_life": 1.0
+
+# Alert thresholds (more conservative for ICS)
+outputs:
+  thresholds:
+    escalate_if:
+      - "Safety_Impact >= 0.6"
+      - "overall_risk in ['High', 'Critical']"
+      - "Physical_Process_Impact >= 0.8"
+      - "KnownExploited == 1 AND Availability_Impact >= 0.6"
+      - "Legacy_System_Flag >= 0.8 AND CVSS_BaseScore >= 7.0"
+  
+  report_fields:
+    - "likelihood"
+    - "severity"
+    - "overall_risk"
+    - "Safety_Impact"          # ICS-specific
+    - "Availability_Impact"    # ICS-specific
+    - "Physical_Process_Impact" # ICS-specific
+    - "feature_breakdown"
+    - "evidence.provenance"
+  
+  formatting:
+    style: "json_blocks"
+    include_graph: true
+    ics_specific_notes: true
+
+# Recommended ICS databases to download
+recommended_sources:
+  - name: "MITRE ATT&CK for ICS"
+    url: "https://attack.mitre.org/matrices/ics/"
+    format: "STIX 2.0 JSON"
+    update_frequency: "Quarterly"
+    priority: "High"
+  
+  - name: "ICS-CERT Advisories"
+    url: "https://www.cisa.gov/ics-cert-advisories"
+    format: "JSON/RSS"
+    update_frequency: "Weekly"
+    priority: "High"
+  
+  - name: "EMB3D (Embedded Security)"
+    url: "https://github.com/mitre/emb3d"
+    format: "STIX 2.0 JSON"
+    update_frequency: "Quarterly"
+    priority: "Medium"
+  
+  - name: "CWE Hardware Weaknesses"
+    url: "https://cwe.mitre.org/data/definitions/1194.html"
+    format: "XML/JSON"
+    update_frequency: "Annually"
+    priority: "Low"
+
+# Example threat inputs
+examples:
+  - title: "Modbus TCP Protocol Vulnerability in SCADA"
+    description: "Unauthenticated access to Modbus TCP allowing unauthorized read/write of PLC registers"
+    asset: "PLC"
+    protocol: "Modbus"
+    expected_output:
+      likelihood: "High (7-8/10)"
+      severity: "Critical (9-10/10)"
+      overall_risk: "Critical"
+      reasoning: "Unauthenticated ICS protocol + PLC control = safety risk"
+  
+  - title: "CVE-2024-XXXXX Buffer Overflow in HMI Software"
+    description: "Stack-based buffer overflow allowing remote code execution on operator interface"
+    asset: "HMI"
+    cve: "CVE-2024-XXXXX"
+    expected_output:
+      likelihood: "Medium (5-6/10)"
+      severity: "High (8/10)"
+      overall_risk: "High"
+      reasoning: "RCE on HMI can disrupt monitoring and control"

@@ -1,0 +1,77 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Environment variables
+.env
+.env.local
+
+# Output directories
+out/
+*.tmp
+
+# Jupyter
+.ipynb_checkpoints
+
+# spaCy models (users should download themselves)
+*.model
+
+# Database files (if any local DBs)
+*.db
+*.sqlite
+
+# Runtime data (downloaded via sync_intel_feeds.py)
+data/
+indexes/
+
+# Temp / debug artifacts
+tmp_*.json
+*.sarif
+.codeql-db/
+mitre_ics_stub.json

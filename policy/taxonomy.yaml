@@ -1,0 +1,470 @@
+# taxonomy.yaml
+# ─────────────────────────────────────────────────────────────────────
+# Single source of truth for every classification pattern used by the
+# DetRisk risk engine's NLP + keyword feature extractors.
+#
+# Each top-level key names a *feature extractor*.  Under it:
+#   nlp_templates   – spaCy semantic-similarity targets (used first)
+#   keywords        – substring-match fallback
+#   settings        – thresholds, scoring mode, boosts
+# ─────────────────────────────────────────────────────────────────────
+
+attack_vector:
+  feature: Attack_Vector_Exploitability
+  evidence_source_nlp: "Attack Vector Analysis (NLP)"
+  evidence_source_kw:  "Attack Vector Analysis (Keywords)"
+
+  settings:
+    nlp_threshold: 0.55
+    keyword_default: 0.0          # no match → 0
+    multi_match_mode: avg_top_2   # avg_top_2 | max | avg_top_3
+    active_exploitation_boost: 0.1
+    active_exploitation_phrases:
+      - "actively exploited"
+      - "in the wild"
+      - "exploit available"
+      - "public exploit"
+
+  nlp_templates:
+    buffer_overflow:
+      text: "buffer overflow stack heap memory corruption vulnerability"
+      score: 0.9
+    injection:
+      text: "SQL injection command injection code injection malicious input"
+      score: 0.9
+    rce:
+      text: "remote code execution arbitrary code run commands"
+      score: 0.95
+    authentication_bypass:
+      text: "authentication bypass default credentials no authentication"
+      score: 0.9
+    deserialization:
+      text: "insecure deserialization object injection untrusted data"
+      score: 0.85
+    xxe:
+      text: "XML external entity XXE injection parser vulnerability"
+      score: 0.8
+    xss_csrf:
+      text: "cross-site scripting XSS CSRF request forgery"
+      score: 0.75
+    privilege_escalation:
+      text: "privilege escalation elevated permissions admin access"
+      score: 0.75
+    phishing:
+      text: "phishing social engineering credential theft email attack"
+      score: 0.8
+    supply_chain:
+      text: "supply chain compromised package dependency attack third-party"
+      score: 0.8
+    insider_threat:
+      text: "insider threat privileged access malicious employee admin abuse"
+      score: 0.8
+    cryptojacking:
+      text: "cryptojacking cryptocurrency mining unauthorized mining"
+      score: 0.65
+    zero_day:
+      text: "zero-day unknown vulnerability unpatched novel exploit"
+      score: 0.8
+    info_disclosure:
+      text: "information disclosure leak server version header response verbose error enumeration"
+      score: 0.50
+
+  keywords:
+    # Very High (0.8–1.0)
+    "buffer overflow": 0.9
+    "stack overflow": 0.9
+    "heap overflow": 0.85
+    "sql injection": 0.9
+    "sqli": 0.9
+    "command injection": 0.9
+    "code injection": 0.85
+    "remote code execution": 0.95
+    "rce": 0.95
+    "unauthenticated": 0.9
+    "no authentication": 0.9
+    "default credentials": 0.95
+    "hardcoded password": 0.95
+    "path traversal": 0.85
+    "directory traversal": 0.85
+    "xxe": 0.8
+    "xml external entity": 0.8
+    "deserialization": 0.85
+    "insecure deserialization": 0.85
+    # High (0.6–0.79)
+    "cross-site scripting": 0.75
+    "xss": 0.75
+    "csrf": 0.7
+    "cross-site request forgery": 0.7
+    "ssrf": 0.75
+    "server-side request forgery": 0.75
+    "open redirect": 0.65
+    "privilege escalation": 0.75
+    "race condition": 0.65
+    "use after free": 0.7
+    "format string": 0.75
+    # Medium (0.4–0.59)
+    "memory leak": 0.5
+    "information disclosure": 0.5
+    "authentication bypass": 0.7
+    "session fixation": 0.6
+    "clickjacking": 0.45
+    # Zero-day indicators
+    "zero-day": 0.8
+    "zero day": 0.8
+    "0-day": 0.8
+
+
+impact_category:
+  feature: Impact_Category
+  evidence_source_nlp: "Impact Category Extraction (NLP)"
+  evidence_source_kw:  "Impact Category Extraction"
+
+  settings:
+    nlp_threshold: 0.70
+    keyword_default: 0.5
+    multi_match_mode: max
+    multi_keyword_boost: 0.1       # added when ≥3 keywords match and max < 0.9
+    multi_keyword_min_count: 3
+
+  # Short-circuit: if prevention language + threat keyword both present → 0.2
+  prevention_patterns:
+    - "prevent"
+    - "block"
+    - "mitigate"
+    - "stop"
+    - "avoid"
+    - "defend"
+    - "successfully prevent"
+    - "successfully block"
+    - "successfully mitigate"
+    - "was prevent"
+    - "was block"
+    - "were prevent"
+    - "were block"
+  prevention_threat_keywords:
+    - "breach"
+    - "attack"
+    - "compromise"
+    - "exploit"
+    - "vulnerability"
+    - "threat"
+  prevention_score: 0.2
+
+  # Dependency-parse patterns (verb + object in subtree → 0.85)
+  dependency_patterns:
+    privilege_escalation:
+      verbs: ["gain", "elevate", "escalate"]
+      objects: ["privilege", "permission", "access", "admin"]
+      score: 0.85
+    data_manipulation:
+      verbs: ["modify", "alter", "tamper", "change"]
+      objects: ["data", "database", "configuration", "record"]
+      score: 0.85
+    code_execution:
+      verbs: ["execute", "run"]
+      objects: ["code", "command", "payload", "script"]
+      score: 0.85
+
+  nlp_templates:
+    ransomware:
+      text: "ransomware encrypted files demanding payment ransom"
+      score: 1.0
+    rce:
+      text: "remote code execution arbitrary commands system"
+      score: 0.9
+    privilege_escalation:
+      text: "gain elevated administrator privileges unauthorized"
+      score: 0.85
+    dos:
+      text: "denial of service unavailable downtime outage"
+      score: 0.8
+    data_manipulation:
+      text: "modified altered tampered data integrity"
+      score: 0.75
+    data_breach:
+      text: "data breach exfiltration unauthorized access sensitive records stolen"
+      score: 0.7
+    resource_hijacking:
+      text: "cryptomining botnet resource hijacking"
+      score: 0.6
+    defacement:
+      text: "defaced website modified appearance"
+      score: 0.5
+    information_disclosure:
+      text: "information disclosure leak server version header response verbose error enumeration"
+      score: 0.35
+
+  keywords:
+    # Critical (1.0)
+    "data destruction": 1.0
+    "destroyed": 1.0
+    "permanent loss": 1.0
+    "irrecoverable": 1.0
+    # High – Ransomware/Encryption (0.9)
+    "ransomware": 0.9
+    "encrypted": 0.9
+    "encryption": 0.9
+    "crypto locker": 0.9
+    "file encryption": 0.9
+    # High – Service Disruption (0.8–0.85)
+    "service stop": 0.85
+    "service disruption": 0.85
+    "outage": 0.8
+    "downtime": 0.8
+    "unavailable": 0.8
+    "denial of service": 0.8
+    "ddos": 0.8
+    "operations down": 0.85
+    "system failure": 0.8
+    # Medium-High – Data Manipulation (0.7–0.75)
+    "data manipulation": 0.75
+    "modified": 0.7
+    "altered": 0.7
+    "tampered": 0.75
+    "corrupted": 0.75
+    "integrity compromised": 0.75
+    # Medium – Resource Hijacking (0.6)
+    "resource hijacking": 0.6
+    "cryptomining": 0.6
+    "botnet": 0.6
+    # Medium-Low – Defacement/Disclosure (0.4–0.7)
+    "defacement": 0.5
+    "defaced": 0.5
+    "data breach": 0.7
+    "data leak": 0.7
+    "exfiltration": 0.7
+    "data exposure": 0.65
+    # Zero-day
+    "zero-day": 0.8
+    "zero day": 0.8
+    "unknown vulnerability": 0.75
+    "novel attack": 0.75
+    # RCE
+    "remote code execution": 0.9
+    "rce": 0.9
+    "arbitrary code": 0.85
+    "code injection": 0.8
+    "command injection": 0.8
+
+
+data_sensitivity:
+  feature: Data_Sensitivity
+  evidence_source_nlp: "Data Sensitivity Extraction (NLP)"
+  evidence_source_kw:  "Data Sensitivity Extraction"
+
+  settings:
+    nlp_threshold: 0.70
+    keyword_default: 0.5
+    multi_match_mode: avg_top_3    # average top-3 if ≥3 matches
+    combo_boost: 0.05              # added per matching combo
+
+  combos:
+    - ["customer", "financial"]
+    - ["patient", "medical"]
+    - ["employee", "credentials"]
+    - ["user", "password"]
+
+  nlp_templates:
+    payment:
+      text: "credit card payment financial banking transaction cvv"
+      score: 1.0
+    healthcare:
+      text: "patient medical healthcare phi health record ssn"
+      score: 0.95
+    credentials:
+      text: "password credential api key token secret private key"
+      score: 0.85
+    pii:
+      text: "personal identifiable pii social security passport"
+      score: 0.95
+    proprietary:
+      text: "proprietary confidential trade secret intellectual property"
+      score: 0.75
+    customer:
+      text: "customer user data email contact"
+      score: 0.65
+    internal:
+      text: "internal employee corporate business"
+      score: 0.6
+
+  keywords:
+    # Critical – Financial/Payment (1.0)
+    "payment": 1.0
+    "credit card": 1.0
+    "financial": 1.0
+    "banking": 1.0
+    "transaction": 0.95
+    "account number": 1.0
+    "bank account": 1.0
+    "cvv": 1.0
+    # Critical – Healthcare/PII (0.9–0.95)
+    "pii": 0.95
+    "personal": 0.9
+    "personally identifiable": 0.95
+    "healthcare": 0.95
+    "phi": 0.95
+    "medical": 0.9
+    "patient": 0.9
+    "health record": 0.95
+    "ssn": 1.0
+    "social security": 1.0
+    "passport": 0.95
+    "driver license": 0.9
+    # High – Credentials/Secrets (0.8–0.85)
+    "credentials": 0.85
+    "password": 0.85
+    "secrets": 0.85
+    "api key": 0.85
+    "token": 0.8
+    "private key": 0.9
+    "certificate": 0.8
+    "authentication": 0.75
+    "access key": 0.85
+    "encryption key": 0.9
+    # High – Proprietary/Business (0.7–0.8)
+    "proprietary": 0.75
+    "intellectual property": 0.8
+    "confidential": 0.75
+    "trade secret": 0.8
+    "source code": 0.75
+    "business critical": 0.7
+    # Medium – Customer/Internal (0.5–0.65)
+    "internal": 0.6
+    "customer": 0.65
+    "user data": 0.65
+    "employee": 0.6
+    "email": 0.5
+    "contact": 0.5
+    # Lower (0.3)
+    "public": 0.3
+    "anonymous": 0.3
+
+
+impact_scope:
+  feature: Impact_Scope
+  evidence_source_nlp: "Impact Scope Extraction (NLP)"
+  evidence_source_kw:  "Impact Scope Extraction"
+
+  settings:
+    nlp_threshold: 0.0            # scope uses token matching, not cosine sim
+    keyword_default: 0.5
+    multi_match_mode: max
+    business_impact_boost: 0.1
+
+  business_impact_phrases:
+    - "revenue impact"
+    - "operations down"
+    - "business disruption"
+    - "service unavailable"
+    - "customer impact"
+
+  # NLP: scope_indicators used with POS-aware token matching
+  nlp_scope_indicators:
+    "enterprise": 1.0
+    "organization": 1.0
+    "company": 0.9
+    "widespread": 1.0
+    "global": 1.0
+    "all": 0.9
+    "multiple": 0.7
+    "several": 0.7
+    "many": 0.75
+    "single": 0.5
+    "isolated": 0.4
+    "limited": 0.4
+
+  # Numerical system-count thresholds → score
+  system_count_tiers:
+    - min_count: 100
+      score: 1.0
+    - min_count: 50
+      score: 0.9
+    - min_count: 10
+      score: 0.75
+    - min_count: 3
+      score: 0.6
+    # fallback
+    - min_count: 1
+      score: 0.5
+
+  keywords:
+    # Maximum (1.0)
+    "widespread": 1.0
+    "all systems": 1.0
+    "enterprise-wide": 1.0
+    "organization-wide": 1.0
+    "entire network": 1.0
+    "global": 1.0
+    "company-wide": 1.0
+    "every system": 1.0
+    # High (0.7–0.8)
+    "multiple systems": 0.75
+    "several systems": 0.75
+    "multiple servers": 0.75
+    "several": 0.7
+    "multiple": 0.7
+    "many systems": 0.8
+    "cross-system": 0.75
+    # Medium (0.5–0.6)
+    "single system": 0.5
+    "one system": 0.5
+    "specific": 0.5
+    "targeted": 0.55
+    # Lower (0.3–0.4)
+    "isolated": 0.4
+    "limited": 0.4
+    "localized": 0.4
+    # Context boosters
+    "production": 0.75
+    "critical infrastructure": 1.0
+    "all customers": 0.9
+    "all users": 0.9
+
+
+safety:
+  feature: Safety_Impact_Flag
+  evidence_source_kw: "Safety Impact Detection"
+
+  settings:
+    mode: binary   # any match → 1.0; no match → skip
+
+  keywords:
+    # Medical/Patient Safety
+    "patient safety": 1.0
+    "injury": 1.0
+    "harm": 1.0
+    "shock": 1.0
+    "radiation": 1.0
+    "overexposure": 1.0
+    "hazard": 1.0
+    "life-threatening": 1.0
+    "critical injury": 1.0
+    "medical device": 1.0
+    "safety-critical": 1.0
+    # ICS/OT/Industrial Safety
+    "safety risk": 1.0
+    "equipment damage": 1.0
+    "physical damage": 1.0
+    "machinery failure": 1.0
+    "injury risk": 1.0
+    "personnel safety": 1.0
+    "worker safety": 1.0
+    "operator safety": 1.0
+    "explosion": 1.0
+    "fire risk": 1.0
+    "chemical leak": 1.0
+    "toxic release": 1.0
+    "production safety": 1.0
+    "process safety": 1.0
+    "safety system": 1.0
+    # General Safety
+    "public safety": 1.0
+    "human safety": 1.0
+    "safety hazard": 1.0
+    "safety failure": 1.0
+    "safety critical": 1.0
+    "safety impact": 1.0
+    "safety violation": 1.0
+    "emergency shutdown": 1.0
+    "safety override": 1.0
+    "safety breach": 1.0

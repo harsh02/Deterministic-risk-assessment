@@ -1,0 +1,254 @@
+# risk_rules.hybrid.yaml
+meta:
+  version: 1.0
+  description: >
+    Hybrid deterministic + semantic risk engine.
+    Deterministic rules compute scores; semantic layer retrieves/normalizes evidence.
+  owners: ["risk-eng@yourco"]
+  snapshot:
+    mode: "pinned"          # pinned = use frozen dataset versions below
+    datasets:
+      cve: "nvdcve-2.0-modified.json@2025-09-30"
+      kev: "known_exploited_vulnerabilities.json@2025-10-01"
+      attack_enterprise: "enterprise-attack.json@2025-09-15"
+      emb3d: "emb3d-stix-2.0.1.json@2025-08-20"
+      internal_reports: "internal_pentest_reports.json@v3.4"
+
+sources:
+  file_paths:
+    cve: "data/nvdcve-2.0-modified.json"
+    kev: "data/known_exploited_vulnerabilities.json"
+    attack_enterprise: "data/enterprise-attack.json"
+    emb3d: "data/emb3d-stix-2.0.1.json"
+    internal_reports: "data/internal_pentest_reports.json"
+    epss: "data/epss_scores-2025-10-02.csv.gz"
+  vector_indices:
+    cve_idx: "indexes/cve.faiss"
+    kev_idx: "indexes/kev.faiss"
+    attack_idx: "indexes/attack.faiss"
+    emb3d_idx: "indexes/emb3d.faiss"
+    internal_idx: "indexes/internal.faiss"
+
+ingestion:
+  text_normalization:
+    tokenize: "bert_wordpiece"
+    lowercase: true
+    strip_punctuation: true
+  embeddings:
+    model: "bge-large-en"        # or "text-embedding-3-large"
+    dim: 1024
+    batch_size: 256
+  chunking:
+    strategy: "semantic+window"
+    window_chars: 1200
+    overlap_chars: 150
+  metadata_fields: ["source", "date", "product", "cve", "technique_id", "asset", "control", "page"]
+
+schemas:
+  input_threat:
+    required: ["title", "description"]
+    optional: ["cve", "ttx", "asset", "product", "tags"]
+  evidence_record:
+    fields: ["source", "key", "confidence", "hit_type", "match_score", "excerpt", "url", "date", "raw"]
+
+semantic_layer:
+  retrieval:
+    top_k: 8
+    min_cosine: 0.72         # floor to accept as “semantically similar”
+    decay_by_age:
+      half_life_days: 365    # older evidence down-weighted
+  rerank:
+    model: "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    top_k: 5
+  summarizer:
+    llm:
+      provider: "local_or_api"
+      model: "gpt-4o-mini"
+      temperature: 0.0
+      max_tokens: 400
+    prompt: |
+      You summarize retrieved evidence for a security risk engine.
+      Extract only factual fields (scores, dates, affected products, techniques).
+      Never invent data; if missing, say "unknown".
+  guardrails:
+    allowed_fields: ["cvss_base", "cvss_exploitability", "known_exploited",
+                     "techniques", "capec", "affected_products", "assets",
+                     "mitigations", "exploit_notes"]
+    reject_if_contains: ["confidential PII", "secrets", "keys", "credentials"]
+
+resolvers:
+  cve_link:
+    deterministic:
+      when: "input.cve != null"
+      lookup: "sources.cve"
+      by: "cve"
+    semantic_fallback:
+      when: "input.cve == null"
+      from_index: "sources.vector_indices.cve_idx"
+      query: "input.title + ' ' + input.description"
+  technique_link:
+    deterministic:
+      when: 'input.ttx matches ^(T\d{4}(?:\.\d{3})?)$'
+      lookup: "sources.attack_enterprise"
+      by: "technique_id"
+    semantic_fallback:
+      from_index: "sources.vector_indices.attack_idx"
+      query: "attack technique for: "
+
+features:
+  - name: CVSS_BaseScore
+    from: ["cve_link"]
+    field: "cvss.baseScore"
+    default: 0
+    comment: "0 = no CVE data (triggers without_cvss mode)"
+  - name: CVSS_Exploitability
+    from: ["cve_link"]
+    field: "cvss.exploitabilityScore"
+    default: 0
+    comment: "0 = unknown exploitability"
+  - name: KnownExploited
+    from: ["kev"]
+    deterministic:
+      lookup: "sources.kev"
+      join_on: ["cve", "product"]
+      field: "is_exploited"
+      mapping: { true: 1, false: 0 }
+    semantic_fallback:
+      from_index: "sources.vector_indices.kev_idx"
+      extract_llm_field: "known_exploited"
+      mapping: { "true": 1, "false": 0, "unknown": 0 }
+    default: 0
+    comment: "0 = not in KEV or unknown"
+  - name: Attack_Frequency
+    from: ["attack_enterprise"]
+    field: "frequency"
+    default: 0.4
+    comment: "0.4 = medium frequency (was 0.35, adjusted for better zero-day scoring)"
+  - name: System_Maturity
+    from: ["emb3d"]
+    field: "maturity_level"
+    transform: "1 - maturity_level"
+    default: 0.5
+    comment: "FUTURE FEATURE - Requires user-provided documentation (external hook)"
+    enabled: false
+  - name: Safety_Impact_Flag
+    from: ["internal_reports"]
+    extract_semantic:
+      index: "sources.vector_indices.internal_idx"
+      field: "impact_on_safety_boolean"
+      mapping: { "true": 1, "false": 0, "unknown": 0 }
+    comment: "FUTURE FEATURE - Requires user-provided documentation (external hook)"
+    enabled: false
+  - name: Impact_Category
+    from: ["attack_enterprise"]
+    field: "impact_type"
+    default: 0.6
+    description: "Impact type from MITRE ATT&CK or semantic extraction. 0.6 = medium impact (conservative for zero-days)"
+  - name: Data_Sensitivity
+    from: ["semantic"]
+    field: "data_sensitivity"
+    default: 0.6
+    description: "Data sensitivity based on keywords. 0.6 = medium sensitivity (conservative default)"
+  - name: Impact_Scope
+    from: ["semantic"]
+    field: "impact_scope"
+    default: 0.5
+    description: "Scope of impact. 0.5 = single system default (conservative)"
+  - name: EPSS_Score
+    from: ["epss"]
+    field: "epss"
+    default: 0.05
+    description: "Exploit prediction probability (0-100%). 5% = baseline"
+  - name: EPSS_Percentile
+    from: ["epss"]
+    field: "percentile"
+    default: 0.5
+    description: "EPSS percentile ranking (0-100%)"
+  - name: Attack_Vector_Exploitability
+    from: ["semantic"]
+    field: "attack_vector_exploitability"
+    default: 0.0
+    description: "Exploitability based on attack vector complexity (buffer overflow, SQL injection, etc.). 0 = no known vector"
+  - name: Temporal_Likelihood_Modifier
+    from: ["semantic"]
+    field: "temporal_likelihood_modifier"
+    default: 1.0
+    description: "Temporal context modifier: 0.5 for past incidents (already occurred), 1.0 for active/potential threats"
+
+scoring:
+  likelihood:
+    formula: |
+      Temporal_Likelihood_Modifier * (
+        0.25*norm(CVSS_Exploitability,0,10) +
+        0.25*KnownExploited +
+        0.15*Attack_Frequency +
+        0.10*EPSS_Score +
+        0.25*Attack_Vector_Exploitability
+      )
+    clamp: [0,1]
+    comment: "Temporal_Likelihood_Modifier reduces score by 50% for past incidents (already occurred). Attack_Vector_Exploitability at 25% for better zero-day scoring. Weights: 25% CVSS Exp, 25% KEV, 15% Freq, 10% EPSS, 25% Attack Vector"
+  severity:
+    # Dual-mode severity calculation
+    with_cvss_formula: |
+      0.70*norm(CVSS_BaseScore,0,10) +
+      0.20*context_criticality +
+      0.10*Impact_Scope
+    without_cvss_formula: |
+      0.50*Impact_Category +
+      0.30*context_criticality +
+      0.20*Data_Sensitivity
+    comment: "Dual-mode: use with_cvss for vulnerabilities (CVE), without_cvss for threats"
+    context_criticality:
+      default: 0.5
+      by_asset:
+        "SafetyCriticalDevice": 1.0
+        "BackendService": 0.6
+        "InternalTool": 0.3
+    clamp: [0,1]
+  overall_risk:
+    method: "matrix"
+    matrix:
+      bins: [0.2, 0.4, 0.6, 0.8]
+      labels: ["Low","Medium","High","Critical"]
+      table:
+        - ["Low",    "Low",    "Medium", "High",    "High"]
+        - ["Low",    "Medium", "High",   "High",    "Critical"]
+        - ["Medium", "High",   "High",   "Critical","Critical"]
+        - ["High",   "High",   "Critical","Critical","Critical"]
+        - ["High",   "Critical","Critical","Critical","Critical"]
+
+conflict_resolution:
+  precedence:
+    - deterministic_exact
+    - deterministic_join
+    - semantic_high_conf
+    - semantic_normal
+  tie_breaker: "newest_evidence_first"
+  audit:
+    store_all_candidates: true
+
+calibration:
+  normalization:
+    cvss_base:
+      method: "minmax"
+      min: 0
+      max: 10
+  weights_tuning:
+    strategy: "grid_search"
+    objective: "maximize_precision_at_high"
+
+outputs:
+  report_fields:
+    - "likelihood"
+    - "severity"
+    - "overall_risk"
+    - "feature_breakdown"
+    - "evidence.provenance"
+  thresholds:
+    escalate_if:
+      - "overall_risk in ['High','Critical']"
+      - "KnownExploited == 1"
+      - "likelihood >= 0.7 and severity >= 0.6"
+  formatting:
+    style: "json_blocks"
+    include_graph: true
