@@ -18,32 +18,34 @@ Design assumptions:
 """
 
 from __future__ import annotations
-from typing import Dict, Any, List, Optional
-from functools import lru_cache
-from datetime import datetime, timezone
-from pathlib import Path
+
+import ast
 import importlib.util
-import sys
-import yaml
 import json
 import logging
-import ast
+import sys
+from datetime import datetime, timezone
+from functools import lru_cache
+from pathlib import Path
+from typing import Any
+
+import yaml
 
 # Configure logging
 logger = logging.getLogger(__name__)
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 
 # ---------- NLP imports with lazy loading ----------
 try:
     import spacy
+
     _SPACY_AVAILABLE = True
 except ImportError:
     _SPACY_AVAILABLE = False
 
-_nlp = None           # populated lazily by _get_nlp()
+_nlp = None  # populated lazily by _get_nlp()
 NLP_AVAILABLE = False  # set True once the model is loaded
 
 
@@ -63,14 +65,20 @@ def _get_nlp():
             return _nlp
         except OSError:
             continue
-    logger.warning("spaCy installed but no model found. Run: python -m spacy download en_core_web_md")
+    logger.warning(
+        "spaCy installed but no model found. Run: python -m spacy download en_core_web_md"
+    )
     return None
 
+
 # ---------- Taxonomy-driven feature extractor ----------
-from feature_extractor import TaxonomyExtractor
+from feature_extractor import (
+    TaxonomyExtractor,  # noqa: E402 -- imported here so the optional dependency is loaded only after the preceding setup
+)
 
 _TAXONOMY_PATH = Path(__file__).parent.parent.parent / "policy" / "taxonomy.yaml"
-_taxonomy: Optional[TaxonomyExtractor] = None
+_taxonomy: TaxonomyExtractor | None = None
+
 
 def _get_taxonomy() -> TaxonomyExtractor:
     """Lazy-init the shared TaxonomyExtractor singleton."""
@@ -79,9 +87,11 @@ def _get_taxonomy() -> TaxonomyExtractor:
         _taxonomy = TaxonomyExtractor(_TAXONOMY_PATH, nlp=_get_nlp())
     return _taxonomy
 
+
 # ---------- Semantic search imports with fallback ----------
 try:
     import semantic_search
+
     SEMANTIC_SEARCH_AVAILABLE = True
     # Determine index directory (relative to this file: src/utils/risk_engine.py → ../../indexes)
     SEMANTIC_INDEX_DIR = Path(__file__).parent.parent.parent / "indexes"
@@ -107,14 +117,19 @@ except ModuleNotFoundError:
     if _temporal_proxy is None:
         raise
 
+
 # ---------- exceptions ----------
 class ConfigError(Exception):
     """Raised when the YAML risk policy is malformed or missing required fields."""
+
     pass
+
 
 class ValidationError(Exception):
     """Raised when an input payload fails schema validation."""
+
     pass
+
 
 # ---------- safe formula evaluator ----------
 class SafeFormulaEvaluator:
@@ -130,23 +145,23 @@ class SafeFormulaEvaluator:
         Undeclared variable names and unsupported AST node types raise
         ``ValueError`` immediately.
     """
-    
-    def __init__(self, variables: Dict[str, Any]):
+
+    def __init__(self, variables: dict[str, Any]):
         """
         Initialize evaluator with allowed variables
-        
+
         Args:
             variables: Dictionary of variable names to values (numbers or functions)
         """
         # Separate functions from values
         self.variables = {}
         self.allowed_functions = {
-            'min': min,
-            'max': max,
-            'abs': abs,
-            'round': round,
+            "min": min,
+            "max": max,
+            "abs": abs,
+            "round": round,
         }
-        
+
         for key, value in variables.items():
             if callable(value):
                 # Add custom functions
@@ -154,40 +169,40 @@ class SafeFormulaEvaluator:
             else:
                 # Regular variables
                 self.variables[key] = value
-    
+
     def evaluate(self, formula: str) -> float:
         """
         Safely evaluate a mathematical formula
-        
+
         Args:
             formula: Math expression like "0.35 * Exploitability + 0.35 * KnownExploited"
-        
+
         Returns:
             Calculated result
-        
+
         Raises:
             ValueError: If formula contains disallowed operations
         """
         # Parse formula into AST
         try:
-            node = ast.parse(formula, mode='eval')
+            node = ast.parse(formula, mode="eval")
             result = self._eval_node(node.body)
             return float(result)
         except Exception as e:
-            raise ValueError(f"Failed to evaluate formula '{formula}': {e}")
-    
+            raise ValueError(f"Failed to evaluate formula '{formula}': {e}") from e
+
     def _eval_node(self, node: ast.AST) -> float:
         """
         Recursively evaluate AST nodes (whitelist approach)
-        
+
         Only allows: numbers, basic math operators, approved functions, and defined variables
         """
         # Numbers
         if isinstance(node, ast.Constant):
-            if isinstance(node.value, (int, float)):
+            if isinstance(node.value, int | float):
                 return float(node.value)
             raise ValueError(f"Unsupported constant type: {type(node.value)}")
-        
+
         # Variable names (look up in self.variables)
         elif isinstance(node, ast.Name):
             var_name = node.id
@@ -195,12 +210,12 @@ class SafeFormulaEvaluator:
                 return float(self.variables[var_name])
             else:
                 raise ValueError(f"Undefined variable: {var_name}")
-        
+
         # Binary operations: +, -, *, /, **
         elif isinstance(node, ast.BinOp):
             left = self._eval_node(node.left)
             right = self._eval_node(node.right)
-            
+
             if isinstance(node.op, ast.Add):
                 return left + right
             elif isinstance(node.op, ast.Sub):
@@ -212,10 +227,10 @@ class SafeFormulaEvaluator:
                     raise ValueError("Division by zero")
                 return left / right
             elif isinstance(node.op, ast.Pow):
-                return left ** right
+                return left**right
             else:
                 raise ValueError(f"Unsupported operator: {type(node.op).__name__}")
-        
+
         # Unary operations: -, +
         elif isinstance(node, ast.UnaryOp):
             operand = self._eval_node(node.operand)
@@ -225,27 +240,30 @@ class SafeFormulaEvaluator:
                 return +operand
             else:
                 raise ValueError(f"Unsupported unary operator: {type(node.op).__name__}")
-        
+
         # Function calls: min(), max(), abs(), round()
         elif isinstance(node, ast.Call):
             if not isinstance(node.func, ast.Name):
                 raise ValueError("Only simple function calls allowed")
-            
+
             func_name = node.func.id
             if func_name not in self.allowed_functions:
                 raise ValueError(f"Function '{func_name}' not allowed")
-            
+
             args = [self._eval_node(arg) for arg in node.args]
             return float(self.allowed_functions[func_name](*args))
-        
+
         else:
             raise ValueError(f"Unsupported AST node type: {type(node).__name__}")
 
+
 # ---------- tiny helpers ----------
+
 
 def clamp(x: float, lo: float, hi: float) -> float:
     """Constrain *x* to the closed interval [*lo*, *hi*]."""
     return max(lo, min(hi, x))
+
 
 def norm(x: float, a: float, b: float) -> float:
     """Min-max normalize *x* from range [*a*, *b*] into [0, 1], clamped."""
@@ -253,7 +271,10 @@ def norm(x: float, a: float, b: float) -> float:
         return 0.0
     return clamp((x - a) / (b - a), 0.0, 1.0)
 
-def classify_5x5(likelihood: float, severity: float, bins: List[float], table: List[List[str]]) -> str:
+
+def classify_5x5(
+    likelihood: float, severity: float, bins: list[float], table: list[list[str]]
+) -> str:
     """Map likelihood and severity into a 5×5 risk matrix cell.
 
     Args:
@@ -265,20 +286,34 @@ def classify_5x5(likelihood: float, severity: float, bins: List[float], table: L
     Returns:
         Risk classification string (e.g., 'Critical', 'High', 'Medium', 'Low').
     """
+
     def band(v: float) -> int:
-        if v <= bins[0]: return 0
-        if v <= bins[1]: return 1
-        if v <= bins[2]: return 2
-        if v <= bins[3]: return 3
+        if v <= bins[0]:
+            return 0
+        if v <= bins[1]:
+            return 1
+        if v <= bins[2]:
+            return 2
+        if v <= bins[3]:
+            return 3
         return 4
+
     return table[band(likelihood)][band(severity)]
 
 
 # ---------- ICS domain routing ----------
 
 _OT_ICS_KEYWORDS = {
-    "scada", "plc", "rtu", "dcs", "industrial control", "ot network",
-    "ics", "factory", "power plant", "substation",
+    "scada",
+    "plc",
+    "rtu",
+    "dcs",
+    "industrial control",
+    "ot network",
+    "ics",
+    "factory",
+    "power plant",
+    "substation",
 }
 
 
@@ -332,7 +367,7 @@ def _count_ics_keyword_hits(text: str) -> int:
     return hits
 
 
-def _should_use_ics_domain(payload: Optional[Dict[str, Any]]) -> bool:
+def _should_use_ics_domain(payload: dict[str, Any] | None) -> bool:
     if not payload:
         return False
 
@@ -357,14 +392,14 @@ def _should_use_ics_domain(payload: Optional[Dict[str, Any]]) -> bool:
     return text_hits >= 2
 
 
-def _detect_benign_context(payload: Optional[Dict[str, Any]]) -> tuple[float, List[str]]:
+def _detect_benign_context(payload: dict[str, Any] | None) -> tuple[float, list[str]]:
     if not payload:
         return 0.0, []
 
     text = f"{payload.get('title', '')} {payload.get('description', '')}"
     lowered = text.lower()
     score = 0.0
-    matches: List[str] = []
+    matches: list[str] = []
 
     for phrase, weight in _BENIGN_CONTEXT_HINTS.items():
         if phrase in lowered:
@@ -374,10 +409,10 @@ def _detect_benign_context(payload: Optional[Dict[str, Any]]) -> tuple[float, Li
 
 
 def _apply_benign_context_adjustments(
-    feature_map: Dict[str, float],
-    source_map: Dict[str, str],
-    metadata: Dict[str, Any],
-    payload: Optional[Dict[str, Any]]
+    feature_map: dict[str, float],
+    source_map: dict[str, str],
+    metadata: dict[str, Any],
+    payload: dict[str, Any] | None,
 ) -> None:
     """Dampen severity features when the threat text describes benign or test contexts.
 
@@ -394,7 +429,7 @@ def _apply_benign_context_adjustments(
         return
 
     dampener = clamp(1.0 - 0.6 * benign_score, 0.3, 1.0)
-    adjusted_fields: Dict[str, Dict[str, float]] = {}
+    adjusted_fields: dict[str, dict[str, float]] = {}
 
     for field in ("Impact_Category", "Data_Sensitivity", "Impact_Scope"):
         if field not in feature_map:
@@ -409,10 +444,7 @@ def _apply_benign_context_adjustments(
 
         adjusted = clamp(original * dampener, 0.0, original)
         feature_map[field] = adjusted
-        adjusted_fields[field] = {
-            "original": round(original, 4),
-            "adjusted": round(adjusted, 4)
-        }
+        adjusted_fields[field] = {"original": round(original, 4), "adjusted": round(adjusted, 4)}
 
     if not adjusted_fields:
         return
@@ -432,10 +464,10 @@ def _apply_benign_context_adjustments(
 
 
 def _apply_vagueness_dampening(
-    feature_map: Dict[str, float],
-    source_map: Dict[str, str],
-    metadata: Dict[str, Any],
-    payload: Optional[Dict[str, Any]]
+    feature_map: dict[str, float],
+    source_map: dict[str, str],
+    metadata: dict[str, Any],
+    payload: dict[str, Any] | None,
 ) -> None:
     """Dampen NLP-derived severity features when the input is short or vague.
 
@@ -464,8 +496,7 @@ def _apply_vagueness_dampening(
     dampener = 0.6 + 0.4 * specificity  # range [0.6, 1.0]
 
     nlp_fields = ("Impact_Category", "Data_Sensitivity", "Attack_Vector_Exploitability")
-    nlp_sources = {"nlp", "semantic", "semantic_similarity"}
-    adjusted_fields: Dict[str, Dict[str, float]] = {}
+    adjusted_fields: dict[str, dict[str, float]] = {}
 
     for field in nlp_fields:
         if field not in feature_map:
@@ -504,7 +535,7 @@ def _apply_vagueness_dampening(
 
 
 # ---------- config ----------
-def load_config(path: str) -> Dict[str, Any]:
+def load_config(path: str) -> dict[str, Any]:
     """Load and validate a YAML risk policy file.
 
     The configuration must contain at minimum:
@@ -524,7 +555,7 @@ def load_config(path: str) -> Dict[str, Any]:
     Raises:
         ConfigError: If required sections are missing or malformed.
     """
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
     if not isinstance(cfg, dict):
         raise ConfigError("YAML root must be a mapping")
@@ -534,48 +565,49 @@ def load_config(path: str) -> Dict[str, Any]:
         raise ConfigError("Missing scoring block")
     if "features" not in cfg or not isinstance(cfg["features"], list):
         raise ConfigError("features must be a list")
-    
+
     # Store config file path for resolving relative paths
     cfg["__config_file__"] = path
-    
+
     return cfg
+
 
 # ---------- JSON loader with cache ----------
 @lru_cache(maxsize=16)
 def _load_json(path: str, base_dir: str = None) -> Any:
     """Load and cache JSON file
-    
+
     Args:
         path: File path (can be relative or absolute)
         base_dir: Base directory to resolve relative paths from
     """
     from pathlib import Path
-    
+
     try:
         # Convert to Path object
         file_path = Path(path)
-        
+
         # If path is relative and base_dir provided, resolve from base_dir
         if not file_path.is_absolute() and base_dir:
             file_path = Path(base_dir) / file_path
-        
+
         # Try the resolved path
         if file_path.exists():
-            with open(file_path, "r", encoding="utf-8") as f:
+            with open(file_path, encoding="utf-8") as f:
                 return json.load(f)
-        
+
         # If not found, try common locations relative to project root
         if not file_path.is_absolute():
             # Try from project root (../../ from src/utils)
             project_root = Path(__file__).parent.parent.parent
             alt_path = project_root / path
             if alt_path.exists():
-                with open(alt_path, "r", encoding="utf-8") as f:
+                with open(alt_path, encoding="utf-8") as f:
                     return json.load(f)
-        
+
         logger.debug(f"Could not find {path}")
         return None
-        
+
     except FileNotFoundError:
         logger.debug(f"File not found: {path}")
         return None
@@ -586,10 +618,12 @@ def _load_json(path: str, base_dir: str = None) -> Any:
         logger.warning(f"Could not load {path}: {e}")
         return None
 
+
 # ---------- helper for resolving paths ----------
-def _get_config_base_dir(cfg: Dict[str, Any]) -> str:
+def _get_config_base_dir(cfg: dict[str, Any]) -> str:
     """Get base directory for resolving relative paths in config"""
     from pathlib import Path
+
     # If config has a __file__ key (added by load_config), use its parent's parent (project root)
     # Config is at policy/risk_rules.hybrid.yaml, so parent.parent gives project root
     if "__config_file__" in cfg:
@@ -601,21 +635,21 @@ def _get_config_base_dir(cfg: Dict[str, Any]) -> str:
 # ---------- Indexed lookup caches (C1-C4) ----------
 # Built once on first use; O(1) lookups thereafter.
 
-_nvd_index: Optional[Dict[str, Any]] = None
-_nvd_index_key: Optional[str] = None
+_nvd_index: dict[str, Any] | None = None
+_nvd_index_key: str | None = None
 
-_kev_set: Optional[set] = None
-_kev_data: Optional[Dict[str, Any]] = None
-_kev_index_key: Optional[str] = None
+_kev_set: set | None = None
+_kev_data: dict[str, Any] | None = None
+_kev_index_key: str | None = None
 
-_mitre_index: Optional[Dict[str, tuple]] = None
-_mitre_index_key: Optional[str] = None
+_mitre_index: dict[str, tuple] | None = None
+_mitre_index_key: str | None = None
 
-_epss_cache: Optional[Dict[str, tuple]] = None
-_epss_cache_key: Optional[str] = None
+_epss_cache: dict[str, tuple] | None = None
+_epss_cache_key: str | None = None
 
 
-def _get_nvd_index(cfg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def _get_nvd_index(cfg: dict[str, Any]) -> dict[str, Any] | None:
     """Build (once) a ``{cve_id: item}`` dict from the NVD JSON feed."""
     global _nvd_index, _nvd_index_key
     cve_path = cfg.get("sources", {}).get("file_paths", {}).get("cve")
@@ -629,7 +663,7 @@ def _get_nvd_index(cfg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if not data:
         return None
     cve_items = data.get("CVE_Items", []) or data.get("vulnerabilities", [])
-    index: Dict[str, Any] = {}
+    index: dict[str, Any] = {}
     for item in cve_items:
         cve_obj = item.get("cve", item)
         cve_id = cve_obj.get("id") or cve_obj.get("CVE_data_meta", {}).get("ID")
@@ -641,7 +675,7 @@ def _get_nvd_index(cfg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return _nvd_index
 
 
-def _get_kev_set(cfg: Dict[str, Any]) -> tuple[Optional[set], Optional[Dict[str, Any]]]:
+def _get_kev_set(cfg: dict[str, Any]) -> tuple[set | None, dict[str, Any] | None]:
     """Build (once) a ``set`` of CVE IDs from the CISA KEV catalog."""
     global _kev_set, _kev_data, _kev_index_key
     kev_path = cfg.get("sources", {}).get("file_paths", {}).get("kev")
@@ -656,7 +690,7 @@ def _get_kev_set(cfg: Dict[str, Any]) -> tuple[Optional[set], Optional[Dict[str,
         return None, None
     vulns = data.get("vulnerabilities", [])
     cve_set = set()
-    vuln_map: Dict[str, Any] = {}
+    vuln_map: dict[str, Any] = {}
     for vuln in vulns:
         cve_id = vuln.get("cveID")
         if cve_id:
@@ -669,11 +703,12 @@ def _get_kev_set(cfg: Dict[str, Any]) -> tuple[Optional[set], Optional[Dict[str,
     return _kev_set, _kev_data
 
 
-def _get_mitre_index(cfg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def _get_mitre_index(cfg: dict[str, Any]) -> dict[str, Any] | None:
     """Build (once) a ``{technique_id: stix_object}`` dict from ATT&CK STIX."""
     global _mitre_index, _mitre_index_key
-    attack_path = cfg.get("sources", {}).get("file_paths", {}).get("mitre_attack") or \
-                  cfg.get("sources", {}).get("file_paths", {}).get("attack_enterprise")
+    attack_path = cfg.get("sources", {}).get("file_paths", {}).get("mitre_attack") or cfg.get(
+        "sources", {}
+    ).get("file_paths", {}).get("attack_enterprise")
     if not attack_path:
         return None
     key = attack_path
@@ -683,7 +718,7 @@ def _get_mitre_index(cfg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     data = _load_json(attack_path, base_dir)
     if not data:
         return None
-    index: Dict[str, Any] = {}
+    index: dict[str, Any] = {}
     for obj in data.get("objects", []):
         if obj.get("type") == "attack-pattern":
             for ref in obj.get("external_references", []):
@@ -698,7 +733,7 @@ def _get_mitre_index(cfg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return _mitre_index
 
 
-def _get_epss_cache(cfg: Dict[str, Any]) -> Optional[Dict[str, tuple]]:
+def _get_epss_cache(cfg: dict[str, Any]) -> dict[str, tuple] | None:
     """Load (once) the EPSS CSV into a ``{cve_id: (score, percentile)}`` dict."""
     global _epss_cache, _epss_cache_key
     import csv
@@ -730,7 +765,7 @@ def _get_epss_cache(cfg: Dict[str, Any]) -> Optional[Dict[str, tuple]]:
 
     try:
         opener = gzip.open if str(epss_file).endswith(".gz") else open
-        cache: Dict[str, tuple] = {}
+        cache: dict[str, tuple] = {}
         with opener(epss_file, "rt", encoding="utf-8") as fh:
             # Skip comment lines
             for line in fh:
@@ -756,7 +791,7 @@ def _get_epss_cache(cfg: Dict[str, Any]) -> Optional[Dict[str, tuple]]:
 # ---------- deterministic resolvers ----------
 
 # -- Shared query embedding cache for deduplication (C5) --
-_query_embedding_cache: Dict[str, Any] = {}  # {text_hash: np.ndarray}
+_query_embedding_cache: dict[str, Any] = {}  # {text_hash: np.ndarray}
 
 
 def _get_query_embedding(description: str):
@@ -774,67 +809,73 @@ def _get_query_embedding(description: str):
         return None
 
 
-def semantic_cve_search(description: str, top_k: int = 5, query_embedding=None) -> List[Dict[str, Any]]:
+def semantic_cve_search(
+    description: str, top_k: int = 5, query_embedding=None
+) -> list[dict[str, Any]]:
     """
     Semantic search for CVEs when no exact CVE ID is provided.
-    
+
     Args:
         description: Natural language threat description
         top_k: Number of matches to return
         query_embedding: Optional pre-computed embedding
-    
+
     Returns:
         List of matched CVEs with similarity scores
     """
     if not SEMANTIC_SEARCH_AVAILABLE:
         logger.warning("Semantic search not available - install sentence-transformers")
         return []
-    
+
     if not SEMANTIC_INDEX_DIR.exists():
         logger.warning(f"Semantic index not found at {SEMANTIC_INDEX_DIR} - run build_indexes.py")
         return []
-    
+
     if query_embedding is None:
         query_embedding = _get_query_embedding(description)
-    
+
     try:
         matches = semantic_search.search_cves(
-            description, 
-            SEMANTIC_INDEX_DIR, 
+            description,
+            SEMANTIC_INDEX_DIR,
             top_k=top_k,
             min_similarity=0.5,
             query_embedding=query_embedding,
         )
-        logger.info(f"Semantic CVE search: Found {len(matches)} matches for '{description[:50]}...'")
+        logger.info(
+            f"Semantic CVE search: Found {len(matches)} matches for '{description[:50]}...'"
+        )
         return matches
     except Exception as e:
         logger.error(f"Semantic CVE search failed: {e}")
         return []
 
 
-def semantic_mitre_search(description: str, top_k: int = 5, domain: str = "enterprise", query_embedding=None) -> List[Dict[str, Any]]:
+def semantic_mitre_search(
+    description: str, top_k: int = 5, domain: str = "enterprise", query_embedding=None
+) -> list[dict[str, Any]]:
     """
     Semantic search for MITRE TTPs when no exact technique ID is provided.
-    
+
     Args:
         description: Natural language threat description
         top_k: Number of matches to return
         query_embedding: Optional pre-computed embedding
-    
+
     Returns:
         List of matched TTPs with similarity scores
     """
     if not SEMANTIC_SEARCH_AVAILABLE:
         logger.warning("Semantic search not available - install sentence-transformers")
         return []
-    
+
     if not SEMANTIC_INDEX_DIR.exists():
         logger.warning(f"Semantic index not found at {SEMANTIC_INDEX_DIR} - run build_indexes.py")
         return []
-    
+
     if query_embedding is None:
         query_embedding = _get_query_embedding(description)
-    
+
     try:
         matches = semantic_search.search_mitre_ttps(
             description,
@@ -853,7 +894,9 @@ def semantic_mitre_search(description: str, top_k: int = 5, domain: str = "enter
         return []
 
 
-def resolve_from_cve(cfg: Dict[str, Any], input_payload: Dict[str, Any]) -> tuple[Dict[str, float], Dict[str, Any]]:
+def resolve_from_cve(
+    cfg: dict[str, Any], input_payload: dict[str, Any]
+) -> tuple[dict[str, float], dict[str, Any]]:
     """Extract CVSS scores from the NVD CVE database.
 
     Supports NVD API formats 1.x and 2.x.  When the input contains a CVE ID,
@@ -868,14 +911,16 @@ def resolve_from_cve(cfg: Dict[str, Any], input_payload: Dict[str, Any]) -> tupl
         Tuple of (features dict with CVSS_BaseScore/Exploitability, evidence dict).
     """
     cve_id = input_payload.get("cve")
-    
+
     # If no CVE ID provided, try semantic search with description
     if not cve_id:
         description = input_payload.get("description", "")
         if description and SEMANTIC_SEARCH_AVAILABLE:
             logger.info("No CVE ID provided - using semantic search")
-            matches = semantic_cve_search(description, top_k=5, query_embedding=input_payload.get("_query_embedding"))
-            
+            matches = semantic_cve_search(
+                description, top_k=5, query_embedding=input_payload.get("_query_embedding")
+            )
+
             if matches:
                 # Use best match
                 best_match = matches[0]
@@ -883,7 +928,7 @@ def resolve_from_cve(cfg: Dict[str, Any], input_payload: Dict[str, Any]) -> tupl
                 input_payload["_resolved_cve_match"] = best_match
                 features = {
                     "CVSS_BaseScore": float(best_match.get("cvss_score", 0)),
-                    "CVSS_Exploitability": float(best_match.get("cvss_exploitability", 0))
+                    "CVSS_Exploitability": float(best_match.get("cvss_exploitability", 0)),
                 }
                 evidence = {
                     "source": "NVD CVE Database (Semantic)",
@@ -892,13 +937,15 @@ def resolve_from_cve(cfg: Dict[str, Any], input_payload: Dict[str, Any]) -> tupl
                     "description": best_match["description"],
                     "features": features,
                     "match_type": "semantic",
-                    "all_matches": matches
+                    "all_matches": matches,
                 }
-                logger.info(f"Semantic CVE match: {best_match['cve_id']} (similarity: {best_match['similarity']:.2%})")
+                logger.info(
+                    f"Semantic CVE match: {best_match['cve_id']} (similarity: {best_match['similarity']:.2%})"
+                )
                 return features, evidence
-        
+
         return {}, {}
-    
+
     # ── O(1) indexed lookup ──
     nvd_idx = _get_nvd_index(cfg)
     if not nvd_idx:
@@ -911,15 +958,9 @@ def resolve_from_cve(cfg: Dict[str, Any], input_payload: Dict[str, Any]) -> tupl
 
         # Capture lifecycle metadata for temporal scoring
         input_payload["_resolved_cve_id"] = cve_id
-        published = (
-            item.get("published")
-            or item.get("publishedDate")
-            or cve_obj.get("published")
-        )
+        published = item.get("published") or item.get("publishedDate") or cve_obj.get("published")
         last_modified = (
-            item.get("lastModified")
-            or item.get("lastModifiedDate")
-            or cve_obj.get("lastModified")
+            item.get("lastModified") or item.get("lastModifiedDate") or cve_obj.get("lastModified")
         )
         references = cve_obj.get("references", {}) or item.get("references", {})
         reference_urls = []
@@ -951,7 +992,7 @@ def resolve_from_cve(cfg: Dict[str, Any], input_payload: Dict[str, Any]) -> tupl
             cvss_version = "3.1"
             features = {
                 "CVSS_BaseScore": float(cvss.get("baseScore", 0)),
-                "CVSS_Exploitability": float(metric.get("exploitabilityScore", 0))
+                "CVSS_Exploitability": float(metric.get("exploitabilityScore", 0)),
             }
         elif "cvssMetricV3" in metrics:
             metric = metrics["cvssMetricV3"][0]
@@ -959,7 +1000,7 @@ def resolve_from_cve(cfg: Dict[str, Any], input_payload: Dict[str, Any]) -> tupl
             cvss_version = "3.0"
             features = {
                 "CVSS_BaseScore": float(cvss.get("baseScore", 0)),
-                "CVSS_Exploitability": float(metric.get("exploitabilityScore", 0))
+                "CVSS_Exploitability": float(metric.get("exploitabilityScore", 0)),
             }
         elif "cvssMetricV2" in metrics:
             metric = metrics["cvssMetricV2"][0]
@@ -967,28 +1008,28 @@ def resolve_from_cve(cfg: Dict[str, Any], input_payload: Dict[str, Any]) -> tupl
             cvss_version = "2.0"
             features = {
                 "CVSS_BaseScore": float(cvss.get("baseScore", 0)),
-                "CVSS_Exploitability": float(metric.get("exploitabilityScore", 0))
+                "CVSS_Exploitability": float(metric.get("exploitabilityScore", 0)),
             }
         elif "baseMetricV31" in metrics:
             cvss = metrics["baseMetricV31"]["cvssV31"]
             cvss_version = "3.1"
             features = {
                 "CVSS_BaseScore": float(cvss.get("baseScore", 0)),
-                "CVSS_Exploitability": float(cvss.get("exploitabilityScore", 0))
+                "CVSS_Exploitability": float(cvss.get("exploitabilityScore", 0)),
             }
         elif "baseMetricV3" in metrics:
             cvss = metrics["baseMetricV3"]["cvssV3"]
             cvss_version = "3.0"
             features = {
                 "CVSS_BaseScore": float(cvss.get("baseScore", 0)),
-                "CVSS_Exploitability": float(cvss.get("exploitabilityScore", 0))
+                "CVSS_Exploitability": float(cvss.get("exploitabilityScore", 0)),
             }
         elif "baseMetricV2" in metrics:
             cvss = metrics["baseMetricV2"]["cvssV2"]
             cvss_version = "2.0"
             features = {
                 "CVSS_BaseScore": float(cvss.get("baseScore", 0)),
-                "CVSS_Exploitability": float(cvss.get("exploitabilityScore", 0))
+                "CVSS_Exploitability": float(cvss.get("exploitabilityScore", 0)),
             }
 
         if features:
@@ -1005,13 +1046,15 @@ def resolve_from_cve(cfg: Dict[str, Any], input_payload: Dict[str, Any]) -> tupl
             }
             logger.debug(f"Found CVE {cve_id}: CVSS={features['CVSS_BaseScore']} (v{cvss_version})")
             return features, evidence
-    
+
     # Exact match failed - try semantic search if description provided
     description = input_payload.get("description", "")
     if description and SEMANTIC_SEARCH_AVAILABLE:
         logger.info(f"CVE {cve_id} not found - trying semantic search")
-        matches = semantic_cve_search(description, top_k=5, query_embedding=input_payload.get("_query_embedding"))
-        
+        matches = semantic_cve_search(
+            description, top_k=5, query_embedding=input_payload.get("_query_embedding")
+        )
+
         if matches:
             # Use the best match (highest similarity)
             best_match = matches[0]
@@ -1019,7 +1062,7 @@ def resolve_from_cve(cfg: Dict[str, Any], input_payload: Dict[str, Any]) -> tupl
             input_payload["_resolved_cve_match"] = best_match
             features = {
                 "CVSS_BaseScore": float(best_match.get("cvss_score", 0)),
-                "CVSS_Exploitability": float(best_match.get("cvss_exploitability", 0))
+                "CVSS_Exploitability": float(best_match.get("cvss_exploitability", 0)),
             }
             evidence = {
                 "source": "NVD CVE Database (Semantic)",
@@ -1028,15 +1071,20 @@ def resolve_from_cve(cfg: Dict[str, Any], input_payload: Dict[str, Any]) -> tupl
                 "description": best_match["description"],
                 "features": features,
                 "match_type": "semantic",
-                "all_matches": matches  # Include all matches for traceability
+                "all_matches": matches,  # Include all matches for traceability
             }
-            logger.info(f"Using semantic match: {best_match['cve_id']} (similarity: {best_match['similarity']:.2%})")
+            logger.info(
+                f"Using semantic match: {best_match['cve_id']} (similarity: {best_match['similarity']:.2%})"
+            )
             return features, evidence
-    
+
     logger.debug(f"CVE {cve_id} not found in database and no semantic matches")
     return {}, {}
 
-def resolve_from_kev(cfg: Dict[str, Any], input_payload: Dict[str, Any]) -> tuple[Dict[str, float], Dict[str, Any]]:
+
+def resolve_from_kev(
+    cfg: dict[str, Any], input_payload: dict[str, Any]
+) -> tuple[dict[str, float], dict[str, Any]]:
     """Check whether a CVE appears in the CISA Known Exploited Vulnerabilities catalog.
 
     Sets ``KnownExploited`` to 1.0 if the CVE is listed (indicating confirmed
@@ -1081,7 +1129,7 @@ def resolve_from_kev(cfg: Dict[str, Any], input_payload: Dict[str, Any]) -> tupl
                 input_payload["_resolved_cve_match"] = best_match
     if not cve_id:
         return {}, {}
-    
+
     # ── O(1) indexed lookup ──
     kev_cve_set, kev_vuln_map = _get_kev_set(cfg)
     if kev_cve_set is None:
@@ -1093,7 +1141,7 @@ def resolve_from_kev(cfg: Dict[str, Any], input_payload: Dict[str, Any]) -> tupl
             "source": "CISA KEV Database",
             "cve_id": cve_id,
             "exploit_status": "ACTIVELY EXPLOITED",
-            "features": features
+            "features": features,
         }
         return features, evidence
 
@@ -1103,11 +1151,14 @@ def resolve_from_kev(cfg: Dict[str, Any], input_payload: Dict[str, Any]) -> tupl
         "source": "CISA KEV Database",
         "cve_id": cve_id,
         "exploit_status": "Not in KEV (no known exploitation)",
-        "features": features
+        "features": features,
     }
     return features, evidence
 
-def resolve_attack_frequency(cfg: Dict[str, Any], input_payload: Dict[str, Any]) -> tuple[Dict[str, float], Dict[str, Any]]:
+
+def resolve_attack_frequency(
+    cfg: dict[str, Any], input_payload: dict[str, Any]
+) -> tuple[dict[str, float], dict[str, Any]]:
     """Resolve attack frequency from a MITRE ATT&CK technique.
 
     When a technique ID is provided, performs an exact lookup in the ATT&CK
@@ -1123,20 +1174,27 @@ def resolve_attack_frequency(cfg: Dict[str, Any], input_payload: Dict[str, Any])
     """
     ttx = input_payload.get("ttx")
     mitre_domain = "ics" if _should_use_ics_domain(input_payload) else "enterprise"
-    semantic_source = "MITRE ATT&CK ICS (Semantic)" if mitre_domain == "ics" else "MITRE ATT&CK (Semantic)"
-    
+    semantic_source = (
+        "MITRE ATT&CK ICS (Semantic)" if mitre_domain == "ics" else "MITRE ATT&CK (Semantic)"
+    )
+
     # If no TTX provided, try semantic search
     if not ttx:
         description = input_payload.get("description", "")
         if description and SEMANTIC_SEARCH_AVAILABLE:
             logger.info("No MITRE TTP provided - using semantic search")
-            matches = semantic_mitre_search(description, top_k=5, domain=mitre_domain, query_embedding=input_payload.get("_query_embedding"))
-            
+            matches = semantic_mitre_search(
+                description,
+                top_k=5,
+                domain=mitre_domain,
+                query_embedding=input_payload.get("_query_embedding"),
+            )
+
             if matches:
                 # Use best match and calculate frequency based on similarity
                 best_match = matches[0]
                 similarity = best_match["similarity"]
-                
+
                 # Convert similarity to attack frequency (0.5-1.0 range for good matches)
                 frequency = 0.5 + (similarity * 0.5)  # 50% sim → 0.75 freq, 100% sim → 1.0 freq
                 benign_score, benign_matches = _detect_benign_context(input_payload)
@@ -1144,11 +1202,8 @@ def resolve_attack_frequency(cfg: Dict[str, Any], input_payload: Dict[str, Any])
                 if benign_score > 0:
                     dampener = 1.0 - 0.5 * benign_score
                     frequency = clamp(frequency * dampener, 0.0, 1.0)
-                    benign_details = {
-                        "matches": benign_matches,
-                        "dampener": round(dampener, 3)
-                    }
-                
+                    benign_details = {"matches": benign_matches, "dampener": round(dampener, 3)}
+
                 features = {"Attack_Frequency": float(frequency)}
                 evidence = {
                     "source": semantic_source,
@@ -1158,15 +1213,17 @@ def resolve_attack_frequency(cfg: Dict[str, Any], input_payload: Dict[str, Any])
                     "tactics": best_match.get("tactics", []),
                     "match_type": "semantic",
                     "all_matches": matches,
-                    "features": features
+                    "features": features,
                 }
                 if benign_details:
                     evidence["benign_context"] = benign_details
-                logger.info(f"Semantic MITRE match: {best_match['technique_id']} - {best_match['name']} (similarity: {similarity:.2%}, freq: {frequency:.2f})")
+                logger.info(
+                    f"Semantic MITRE match: {best_match['technique_id']} - {best_match['name']} (similarity: {similarity:.2%}, freq: {frequency:.2f})"
+                )
                 return features, evidence
-        
+
         return {}, {}
-    
+
     # ── O(1) indexed lookup ──
     mitre_idx = _get_mitre_index(cfg)
     if not mitre_idx:
@@ -1187,24 +1244,26 @@ def resolve_attack_frequency(cfg: Dict[str, Any], input_payload: Dict[str, Any])
             "technique_name": technique_name,
             "data_sources": len(obj.get("x_mitre_data_sources", [])),
             "match_type": "exact",
-            "features": features
+            "features": features,
         }
         benign_score, benign_matches = _detect_benign_context(input_payload)
         if benign_score > 0:
             dampener = 1.0 - 0.5 * benign_score
             features["Attack_Frequency"] = clamp(features["Attack_Frequency"] * dampener, 0.0, 1.0)
-            evidence["benign_context"] = {
-                "matches": benign_matches,
-                "dampener": round(dampener, 3)
-            }
+            evidence["benign_context"] = {"matches": benign_matches, "dampener": round(dampener, 3)}
         return features, evidence
-    
+
     # Exact TTX not found - try semantic search
     description = input_payload.get("description", "")
     if description and SEMANTIC_SEARCH_AVAILABLE:
         logger.info(f"MITRE TTP {ttx} not found - trying semantic search")
-        matches = semantic_mitre_search(description, top_k=5, domain=mitre_domain, query_embedding=input_payload.get("_query_embedding"))
-        
+        matches = semantic_mitre_search(
+            description,
+            top_k=5,
+            domain=mitre_domain,
+            query_embedding=input_payload.get("_query_embedding"),
+        )
+
         if matches:
             best_match = matches[0]
             similarity = best_match["similarity"]
@@ -1214,11 +1273,8 @@ def resolve_attack_frequency(cfg: Dict[str, Any], input_payload: Dict[str, Any])
             if benign_score > 0:
                 dampener = 1.0 - 0.5 * benign_score
                 frequency = clamp(frequency * dampener, 0.0, 1.0)
-                benign_details = {
-                    "matches": benign_matches,
-                    "dampener": round(dampener, 3)
-                }
-            
+                benign_details = {"matches": benign_matches, "dampener": round(dampener, 3)}
+
             features = {"Attack_Frequency": float(frequency)}
             evidence = {
                 "source": semantic_source,
@@ -1228,34 +1284,39 @@ def resolve_attack_frequency(cfg: Dict[str, Any], input_payload: Dict[str, Any])
                 "tactics": best_match.get("tactics", []),
                 "match_type": "semantic",
                 "all_matches": matches,
-                "features": features
+                "features": features,
             }
             if benign_details:
                 evidence["benign_context"] = benign_details
-            logger.info(f"Semantic MITRE match: {best_match['technique_id']} (similarity: {similarity:.2%})")
+            logger.info(
+                f"Semantic MITRE match: {best_match['technique_id']} (similarity: {similarity:.2%})"
+            )
             return features, evidence
-    
+
     return {}, {}
 
-def resolve_emb3d_maturity(cfg: Dict[str, Any], input_payload: Dict[str, Any]) -> tuple[Dict[str, float], Dict[str, Any]]:
+
+def resolve_emb3d_maturity(
+    cfg: dict[str, Any], input_payload: dict[str, Any]
+) -> tuple[dict[str, float], dict[str, Any]]:
     """Resolve system maturity from EMB3D threat model
-    
+
     Returns:
         (features_dict, evidence_dict)
     """
     asset = input_payload.get("asset", "").lower()
     if not asset:
         return {}, {}
-    
+
     emb3d_path = cfg.get("sources", {}).get("file_paths", {}).get("emb3d")
     if not emb3d_path:
         return {}, {}
-    
+
     base_dir = _get_config_base_dir(cfg)
     data = _load_json(emb3d_path, base_dir)
     if not data:
         return {}, {}
-    
+
     # EMB3D STIX format - look for device/platform indicators
     objects = data.get("objects", [])
     for obj in objects:
@@ -1263,22 +1324,27 @@ def resolve_emb3d_maturity(cfg: Dict[str, Any], input_payload: Dict[str, Any]) -
         if asset in name or name in asset:
             # Estimate maturity from threat model completeness
             # More properties = more mature threat model
-            props_count = len(obj.get("x_mitre_platforms", [])) + len(obj.get("x_mitre_data_sources", []))
+            props_count = len(obj.get("x_mitre_platforms", [])) + len(
+                obj.get("x_mitre_data_sources", [])
+            )
             maturity_level = min(1.0, props_count / 20.0)
-            
+
             features = {"System_Maturity": 1.0 - maturity_level}
             evidence = {
                 "source": "EMB3D Threat Model",
                 "asset": asset,
                 "matched_threat": name,
                 "maturity_indicators": props_count,
-                "features": features
+                "features": features,
             }
             return features, evidence
-    
+
     return {}, {}
 
-def resolve_internal_safety(cfg: Dict[str, Any], input_payload: Dict[str, Any], *, doc=None) -> tuple[Dict[str, float], Dict[str, Any]]:
+
+def resolve_internal_safety(
+    cfg: dict[str, Any], input_payload: dict[str, Any], *, doc=None
+) -> tuple[dict[str, float], dict[str, Any]]:
     """Detect safety-relevant impact from threat description keywords.
 
     Delegates to ``TaxonomyExtractor`` for keyword matching against the
@@ -1297,8 +1363,9 @@ def resolve_internal_safety(cfg: Dict[str, Any], input_payload: Dict[str, Any], 
     combined_text = f"{title} {description}"
 
     # Optionally check internal reports database if it exists
-    pentest_path = cfg.get("sources", {}).get("file_paths", {}).get("internal_pentest") or \
-                   cfg.get("sources", {}).get("file_paths", {}).get("internal_reports")
+    pentest_path = cfg.get("sources", {}).get("file_paths", {}).get("internal_pentest") or cfg.get(
+        "sources", {}
+    ).get("file_paths", {}).get("internal_reports")
     if pentest_path:
         base_dir = _get_config_base_dir(cfg)
         data = _load_json(pentest_path, base_dir)
@@ -1310,9 +1377,14 @@ def resolve_internal_safety(cfg: Dict[str, Any], input_payload: Dict[str, Any], 
             # Text was extended — invalidate pre-parsed doc
             doc = None
 
-    return _get_taxonomy().extract("safety", combined_text, cfg=cfg, input_payload=input_payload, doc=doc)
+    return _get_taxonomy().extract(
+        "safety", combined_text, cfg=cfg, input_payload=input_payload, doc=doc
+    )
 
-def resolve_from_epss(cfg: Dict[str, Any], input_payload: Dict[str, Any]) -> tuple[Dict[str, float], Dict[str, Any]]:
+
+def resolve_from_epss(
+    cfg: dict[str, Any], input_payload: dict[str, Any]
+) -> tuple[dict[str, float], dict[str, Any]]:
     """Retrieve EPSS exploit probability and percentile for a CVE.
 
     EPSS (Exploit Prediction Scoring System) predicts the probability that a
@@ -1337,21 +1409,21 @@ def resolve_from_epss(cfg: Dict[str, Any], input_payload: Dict[str, Any]) -> tup
         return {}, {}
 
     epss_score, percentile = entry
-    features = {
-        "EPSS_Score": epss_score,
-        "EPSS_Percentile": percentile
-    }
+    features = {"EPSS_Score": epss_score, "EPSS_Percentile": percentile}
     evidence = {
         "source": "EPSS Database",
         "cve_id": cve_id,
         "epss_score": epss_score,
         "percentile": percentile,
         "interpretation": f"Top {int((1-percentile)*100)}% most likely to be exploited",
-        "features": features
+        "features": features,
     }
     return features, evidence
 
-def extract_attack_vector_exploitability(cfg: Dict[str, Any], input_payload: Dict[str, Any], *, doc=None) -> tuple[Dict[str, float], Dict[str, Any]]:
+
+def extract_attack_vector_exploitability(
+    cfg: dict[str, Any], input_payload: dict[str, Any], *, doc=None
+) -> tuple[dict[str, float], dict[str, Any]]:
     """Score exploitability based on the attack vector described in the threat text.
 
     Delegates to ``TaxonomyExtractor`` (``attack_vector`` section).
@@ -1360,10 +1432,17 @@ def extract_attack_vector_exploitability(cfg: Dict[str, Any], input_payload: Dic
     Returns:
         Tuple of (features dict with Attack_Vector_Exploitability, evidence dict).
     """
-    description = (input_payload.get("title", "") + " " + input_payload.get("description", "")).lower()
-    return _get_taxonomy().extract("attack_vector", description, cfg=cfg, input_payload=input_payload, doc=doc)
+    description = (
+        input_payload.get("title", "") + " " + input_payload.get("description", "")
+    ).lower()
+    return _get_taxonomy().extract(
+        "attack_vector", description, cfg=cfg, input_payload=input_payload, doc=doc
+    )
 
-def extract_temporal_context(cfg: Dict[str, Any], input_payload: Dict[str, Any]) -> tuple[Dict[str, float], Dict[str, Any]]:
+
+def extract_temporal_context(
+    cfg: dict[str, Any], input_payload: dict[str, Any]
+) -> tuple[dict[str, float], dict[str, Any]]:
     """Detect whether the threat describes a past incident or an active/potential threat.
 
     Past incidents (already occurred) receive a ``Temporal_Likelihood_Modifier``
@@ -1374,51 +1453,93 @@ def extract_temporal_context(cfg: Dict[str, Any], input_payload: Dict[str, Any])
     Returns:
         Tuple of (features dict with Temporal_Likelihood_Modifier, evidence dict).
     """
-    description = (input_payload.get("title", "") + " " + input_payload.get("description", "")).lower()
-    
+    description = (
+        input_payload.get("title", "") + " " + input_payload.get("description", "")
+    ).lower()
+
     # Past tense indicators
     past_tense_patterns = [
         # Past actions - definite incidents
-        "was encrypted", "were encrypted", "has been encrypted", "had been encrypted",
-        "was compromised", "were compromised", "has been compromised", "had been compromised",
-        "was exploited", "were exploited", "has been exploited",
-        "was breached", "were breached", "has been breached",
-        "was infected", "were infected", "has been infected",
-        "was attacked", "were attacked", "has been attacked",
-        "occurred", "happened", "took place",
+        "was encrypted",
+        "were encrypted",
+        "has been encrypted",
+        "had been encrypted",
+        "was compromised",
+        "were compromised",
+        "has been compromised",
+        "had been compromised",
+        "was exploited",
+        "were exploited",
+        "has been exploited",
+        "was breached",
+        "were breached",
+        "has been breached",
+        "was infected",
+        "were infected",
+        "has been infected",
+        "was attacked",
+        "were attacked",
+        "has been attacked",
+        "occurred",
+        "happened",
+        "took place",
         # Incident response indicators
-        "operations down for", "downtime of", "systems were down",
-        "resulted in", "caused by", "led to",
+        "operations down for",
+        "downtime of",
+        "systems were down",
+        "resulted in",
+        "caused by",
+        "led to",
         # Time indicators
-        "yesterday", "last week", "last month", "days ago", "weeks ago",
-        "on [date]", "in [month]", "earlier this"
+        "yesterday",
+        "last week",
+        "last month",
+        "days ago",
+        "weeks ago",
+        "on [date]",
+        "in [month]",
+        "earlier this",
     ]
-    
+
     # Present/Future tense indicators - active threats
     active_threat_patterns = [
-        "can be", "could be", "may be", "might be",
-        "allows", "enables", "permits", "vulnerable to",
-        "potential for", "possible to", "able to",
-        "exposes", "risks", "threatens",
-        "actively exploited", "being exploited", "under attack",
-        "zero-day", "unpatched", "newly discovered"
+        "can be",
+        "could be",
+        "may be",
+        "might be",
+        "allows",
+        "enables",
+        "permits",
+        "vulnerable to",
+        "potential for",
+        "possible to",
+        "able to",
+        "exposes",
+        "risks",
+        "threatens",
+        "actively exploited",
+        "being exploited",
+        "under attack",
+        "zero-day",
+        "unpatched",
+        "newly discovered",
     ]
-    
+
     past_score = 0
     active_score = 0
     matched_past = []
     matched_active = []
-    
+
     for pattern in past_tense_patterns:
         if pattern in description:
             past_score += 1
             matched_past.append(pattern)
-    
+
     for pattern in active_threat_patterns:
         if pattern in description:
             active_score += 1
             matched_active.append(pattern)
-    
+
     # Determine temporal context
     if past_score > active_score and past_score >= 1:
         # Past incident - reduce likelihood
@@ -1435,7 +1556,7 @@ def extract_temporal_context(cfg: Dict[str, Any], input_payload: Dict[str, Any])
         temporal_modifier = 1.0
         context = "unclear"
         interpretation = "Temporal context unclear"
-    
+
     features = {"Temporal_Likelihood_Modifier": temporal_modifier}
     evidence = {
         "source": "Temporal Context Analysis",
@@ -1445,16 +1566,20 @@ def extract_temporal_context(cfg: Dict[str, Any], input_payload: Dict[str, Any])
         "active_indicators": matched_active[:3],
         "modifier": temporal_modifier,
         "confidence": 0.8 if (past_score >= 2 or active_score >= 2) else 0.5,
-        "features": features
+        "features": features,
     }
-    
+
     return features, evidence
+
 
 # ---------- Taxonomy-driven Feature Extractors ----------
 # All classification patterns now live in policy/taxonomy.yaml.
 # These thin wrappers delegate to TaxonomyExtractor for NLP + keyword matching.
 
-def extract_impact_category(cfg: Dict[str, Any], input_payload: Dict[str, Any], *, doc=None) -> tuple[Dict[str, float], Dict[str, Any]]:
+
+def extract_impact_category(
+    cfg: dict[str, Any], input_payload: dict[str, Any], *, doc=None
+) -> tuple[dict[str, float], dict[str, Any]]:
     """Extract impact severity category from the threat description.
 
     Delegates to ``TaxonomyExtractor`` (``impact_category`` section).
@@ -1463,11 +1588,17 @@ def extract_impact_category(cfg: Dict[str, Any], input_payload: Dict[str, Any], 
     Returns:
         Tuple of (features dict with Impact_Category, evidence dict).
     """
-    description = (input_payload.get("title", "") + " " + input_payload.get("description", "")).lower()
-    return _get_taxonomy().extract("impact_category", description, cfg=cfg, input_payload=input_payload, doc=doc)
+    description = (
+        input_payload.get("title", "") + " " + input_payload.get("description", "")
+    ).lower()
+    return _get_taxonomy().extract(
+        "impact_category", description, cfg=cfg, input_payload=input_payload, doc=doc
+    )
 
 
-def extract_data_sensitivity(cfg: Dict[str, Any], input_payload: Dict[str, Any], *, doc=None) -> tuple[Dict[str, float], Dict[str, Any]]:
+def extract_data_sensitivity(
+    cfg: dict[str, Any], input_payload: dict[str, Any], *, doc=None
+) -> tuple[dict[str, float], dict[str, Any]]:
     """Assess data sensitivity from the threat description.
 
     Delegates to ``TaxonomyExtractor`` (``data_sensitivity`` section).
@@ -1476,11 +1607,17 @@ def extract_data_sensitivity(cfg: Dict[str, Any], input_payload: Dict[str, Any],
     Returns:
         Tuple of (features dict with Data_Sensitivity, evidence dict).
     """
-    description = (input_payload.get("title", "") + " " + input_payload.get("description", "")).lower()
-    return _get_taxonomy().extract("data_sensitivity", description, cfg=cfg, input_payload=input_payload, doc=doc)
+    description = (
+        input_payload.get("title", "") + " " + input_payload.get("description", "")
+    ).lower()
+    return _get_taxonomy().extract(
+        "data_sensitivity", description, cfg=cfg, input_payload=input_payload, doc=doc
+    )
 
 
-def extract_impact_scope(cfg: Dict[str, Any], input_payload: Dict[str, Any], *, doc=None) -> tuple[Dict[str, float], Dict[str, Any]]:
+def extract_impact_scope(
+    cfg: dict[str, Any], input_payload: dict[str, Any], *, doc=None
+) -> tuple[dict[str, float], dict[str, Any]]:
     """Estimate the blast radius of a threat from description text.
 
     Delegates to ``TaxonomyExtractor`` (``impact_scope`` section).
@@ -1490,7 +1627,9 @@ def extract_impact_scope(cfg: Dict[str, Any], input_payload: Dict[str, Any], *, 
     Returns:
         Tuple of (features dict with Impact_Scope, evidence dict).
     """
-    description = (input_payload.get("title", "") + " " + input_payload.get("description", "")).lower()
+    description = (
+        input_payload.get("title", "") + " " + input_payload.get("description", "")
+    ).lower()
 
     # Impact scope uses token-level matching, not cosine similarity
     nlp = _get_nlp()
@@ -1501,16 +1640,22 @@ def extract_impact_scope(cfg: Dict[str, Any], input_payload: Dict[str, Any], *, 
             evidence = {
                 "source": "Impact Scope Extraction (NLP)",
                 "matched_scope": nlp_evidence.get("method", "semantic"),
-                "all_matches": [nlp_evidence.get("keyword") or nlp_evidence.get("entity_type", "detected")],
+                "all_matches": [
+                    nlp_evidence.get("keyword") or nlp_evidence.get("entity_type", "detected")
+                ],
                 "score": nlp_score,
                 "confidence": nlp_evidence.get("confidence", 0.85),
             }
             return features, evidence
 
-    return _get_taxonomy().extract("impact_scope", description, cfg=cfg, input_payload=input_payload, doc=doc)
+    return _get_taxonomy().extract(
+        "impact_scope", description, cfg=cfg, input_payload=input_payload, doc=doc
+    )
 
 
-def deterministic_features_from_dbs(cfg: Dict[str, Any], input_payload: Dict[str, Any]) -> tuple[Dict[str, float], List[Dict[str, Any]]]:
+def deterministic_features_from_dbs(
+    cfg: dict[str, Any], input_payload: dict[str, Any]
+) -> tuple[dict[str, float], list[dict[str, Any]]]:
     """Run all registered resolvers and merge their feature outputs.
 
     Each resolver independently queries a data source (NVD, KEV, MITRE, EPSS,
@@ -1526,9 +1671,9 @@ def deterministic_features_from_dbs(cfg: Dict[str, Any], input_payload: Dict[str
     Returns:
         Tuple of (merged feature dict, list of evidence records).
     """
-    features: Dict[str, float] = {}
-    evidence_list: List[Dict[str, Any]] = []
-    
+    features: dict[str, float] = {}
+    evidence_list: list[dict[str, Any]] = []
+
     # ── Parse the description once for all NLP-backed extractors ──
     desc_text = (
         input_payload.get("title", "") + " " + input_payload.get("description", "")
@@ -1587,15 +1732,19 @@ def deterministic_features_from_dbs(cfg: Dict[str, Any], input_payload: Dict[str
 
     return features, evidence_list
 
+
 # ---------- feature assembly (defaults + overrides) ----------
-def _feature_defaults(cfg: Dict[str, Any]) -> Dict[str, float]:
-    vals: Dict[str, float] = {}
+def _feature_defaults(cfg: dict[str, Any]) -> dict[str, float]:
+    vals: dict[str, float] = {}
     for f in cfg.get("features", []):
         name = f["name"]
         vals[name] = float(f.get("default", 0))
     return vals
 
-def build_features(cfg: Dict[str, Any], overrides: Dict[str, Any], input_payload: Dict[str, Any] = None) -> tuple[Dict[str, float], Dict[str, Any]]:
+
+def build_features(
+    cfg: dict[str, Any], overrides: dict[str, Any], input_payload: dict[str, Any] = None
+) -> tuple[dict[str, float], dict[str, Any]]:
     """Assemble the complete feature vector for scoring.
 
     Feature values are layered with increasing priority:
@@ -1618,35 +1767,35 @@ def build_features(cfg: Dict[str, Any], overrides: Dict[str, Any], input_payload
     vals = _feature_defaults(cfg)
     evidence_list = []
     source_map = {}  # Track where each feature came from
-    
+
     # Mark defaults
     for key in vals:
         source_map[key] = "default"
-    
+
     # Apply DB-resolved values if payload provided
     if input_payload:
         db_features, evidence_list = deterministic_features_from_dbs(cfg, input_payload)
         for key, value in db_features.items():
             vals[key] = value
             source_map[key] = "database"
-    
+
     # Apply manual overrides (highest priority)
     for k, v in (overrides or {}).items():
         if k in vals:
             vals[k] = float(v)
             source_map[k] = "manual_override"
-    
+
     # Calculate confidence (% of features from databases)
     total_features = len(vals)
     db_features_count = sum(1 for src in source_map.values() if src == "database")
     confidence = db_features_count / total_features if total_features > 0 else 0.0
-    
+
     metadata = {
         "evidence": evidence_list,
         "source_map": source_map,
         "confidence": confidence,
         "db_features_count": db_features_count,
-        "total_features": total_features
+        "total_features": total_features,
     }
 
     if input_payload:
@@ -1655,11 +1804,14 @@ def build_features(cfg: Dict[str, Any], overrides: Dict[str, Any], input_payload
 
     if input_payload:
         _attach_temporal_risk(metadata, vals, input_payload)
-    
+
     return vals, metadata
 
+
 # ---------- scoring ----------
-def compute_scores(cfg: Dict[str, Any], features: Dict[str, float], context: Dict[str, Any]) -> Dict[str, Any]:
+def compute_scores(
+    cfg: dict[str, Any], features: dict[str, float], context: dict[str, Any]
+) -> dict[str, Any]:
     """Evaluate likelihood and severity formulas and classify overall risk.
 
     Likelihood and severity are computed independently using the formulas
@@ -1683,12 +1835,7 @@ def compute_scores(cfg: Dict[str, Any], features: Dict[str, float], context: Dic
         ConfigError: If a formula string cannot be parsed or evaluated.
     """
     # Prepare variables for formula evaluation
-    variables = {
-        'norm': norm,
-        'min': min,
-        'max': max,
-        'clamp': clamp
-    }
+    variables = {"norm": norm, "min": min, "max": max, "clamp": clamp}
     variables.update(features)
     variables.update(context or {})
 
@@ -1698,12 +1845,12 @@ def compute_scores(cfg: Dict[str, Any], features: Dict[str, float], context: Dic
     # Evaluate likelihood formula
     like_expr = cfg["scoring"]["likelihood"]["formula"]
     like_expr = " ".join(like_expr.split())  # Clean up formatting
-    
+
     try:
         likelihood = evaluator.evaluate(like_expr)
     except ValueError as e:
-        raise ConfigError(f"Invalid likelihood formula: {e}")
-    
+        raise ConfigError(f"Invalid likelihood formula: {e}") from e
+
     lo, hi = cfg["scoring"]["likelihood"]["clamp"]
     likelihood = clamp(likelihood, float(lo), float(hi))
 
@@ -1715,28 +1862,28 @@ def compute_scores(cfg: Dict[str, Any], features: Dict[str, float], context: Dic
     by_asset = ctx_cfg.get("by_asset", {})
     asset_type = (context or {}).get("asset_type")
     context_criticality = float(by_asset.get(asset_type, cc_default))
-    
+
     # Add context_criticality to variables for severity formula
     variables["context_criticality"] = context_criticality
     evaluator_sev = SafeFormulaEvaluator(variables)
-    
+
     # Determine which formula to use
     has_cvss = features.get("CVSS_BaseScore", 0) > 0
     severity_mode = "with_cvss" if has_cvss else "without_cvss"
-    
+
     if has_cvss:
         sev_expr = sev_cfg.get("with_cvss_formula", sev_cfg.get("formula", ""))
     else:
         sev_expr = sev_cfg.get("without_cvss_formula", sev_cfg.get("formula", ""))
-    
+
     # Evaluate severity formula
     sev_expr = " ".join(sev_expr.split())  # Clean up formatting
-    
+
     try:
         severity = evaluator_sev.evaluate(sev_expr)
     except ValueError as e:
-        raise ConfigError(f"Invalid severity formula: {e}")
-    
+        raise ConfigError(f"Invalid severity formula: {e}") from e
+
     slo, shi = sev_cfg["clamp"]
     severity = clamp(severity, float(slo), float(shi))
 
@@ -1750,7 +1897,7 @@ def compute_scores(cfg: Dict[str, Any], features: Dict[str, float], context: Dic
         "overall_risk": overall,
         "context_criticality": context_criticality,
         "severity_mode": severity_mode,
-        "feature_breakdown": features
+        "feature_breakdown": features,
     }
 
 
@@ -1758,7 +1905,8 @@ def compute_scores(cfg: Dict[str, Any], features: Dict[str, float], context: Dic
 # Temporal risk (Patent Pending IP — internal use only)
 # ---------------------------------------------------------------------------
 
-def _parse_iso8601(value: Optional[str]) -> Optional[datetime]:
+
+def _parse_iso8601(value: str | None) -> datetime | None:
     """Parse ISO8601 or date strings into timezone-aware datetimes."""
     if not value:
         return None
@@ -1793,20 +1941,21 @@ def _parse_iso8601(value: Optional[str]) -> Optional[datetime]:
             continue
     return None
 
+
 def _extract_temporal_context(
-    metadata: Dict[str, Any],
-    features: Dict[str, float],
-    input_payload: Dict[str, Any],
-) -> Optional[Dict[str, Any]]:
+    metadata: dict[str, Any],
+    features: dict[str, float],
+    input_payload: dict[str, Any],
+) -> dict[str, Any] | None:
     cve_id = (input_payload or {}).get("cve")
     base_score = features.get("CVSS_BaseScore")
     if not cve_id or not base_score:
         return None
 
     evidence_list = (metadata or {}).get("evidence", []) or []
-    published: Optional[str] = None
-    last_modified: Optional[str] = None
-    epss_score: Optional[float] = features.get("EPSS_Score")
+    published: str | None = None
+    last_modified: str | None = None
+    epss_score: float | None = features.get("EPSS_Score")
     kev_listed = False
 
     for ev in evidence_list:
@@ -1840,7 +1989,9 @@ def _extract_temporal_context(
     return context
 
 
-def _attach_temporal_risk(metadata: Dict[str, Any], features: Dict[str, float], input_payload: Dict[str, Any]) -> None:
+def _attach_temporal_risk(
+    metadata: dict[str, Any], features: dict[str, float], input_payload: dict[str, Any]
+) -> None:
     try:
         if not _temporal_proxy.temporal_plugin_ready():
             status = _temporal_proxy.temporal_plugin_status()

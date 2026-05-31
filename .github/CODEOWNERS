@@ -1,0 +1,22 @@
+# Code owners — automatically requested for review on matching PRs.
+# Combined with branch protection ("require review from Code Owners"),
+# this guarantees a human review gate on every change to main.
+# https://docs.github.com/en/repositories/managing-your-repos-settings/about-code-owners
+
+# Default owner for everything in the repo
+*                       @harsh02
+
+# Security-sensitive files — call these out explicitly so changes are obvious
+/.github/               @harsh02
+/.github/workflows/     @harsh02
+/.pre-commit-config.yaml @harsh02
+/.gitignore             @harsh02
+/.secrets.baseline      @harsh02
+/SECURITY.md            @harsh02
+/Dockerfile             @harsh02
+/requirements.txt       @harsh02
+/pyproject.toml         @harsh02
+/setup.py               @harsh02
+
+# Policy / scoring rules drive the engine's behavior — review carefully
+/policy/                @harsh02

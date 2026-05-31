@@ -1,0 +1,55 @@
+# Pre-commit hooks — first line of defense (runs locally before each commit).
+# Install once:   pip install pre-commit && pre-commit install
+# Run on all files: pre-commit run --all-files
+#
+# Phase 1 of the CI/CD security project: catch secrets, lint issues, and
+# Python security anti-patterns BEFORE they ever enter git history.
+# These same checks are mirrored in CI (Phase 2) so they can't be bypassed
+# with `git commit --no-verify`.
+
+default_language_version:
+  python: python3.11
+
+repos:
+  # --- General hygiene -----------------------------------------------------
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]          # block accidental large/binary blobs
+      - id: check-yaml
+      - id: check-json
+      - id: check-toml
+      - id: detect-private-key          # hard block on committing private keys
+      - id: check-executables-have-shebangs
+      - id: mixed-line-ending
+
+  # --- Secret detection ----------------------------------------------------
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: ["--baseline", ".secrets.baseline"]
+        # The baseline records known/triaged findings so only NEW secrets fail.
+        # Regenerate after review: detect-secrets scan > .secrets.baseline
+
+  # --- Python lint / formatting -------------------------------------------
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.4
+    hooks:
+      - id: ruff                        # lint
+        args: ["--fix"]
+      - id: ruff-format                 # format
+
+  # --- Python security (SAST) ---------------------------------------------
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.8.0
+    hooks:
+      - id: bandit
+        args: ["-c", "pyproject.toml"]
+        additional_dependencies: ["bandit[toml]"]
+        exclude: ^tests/

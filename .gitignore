@@ -50,7 +50,61 @@ htmlcov/
 
 # Environment variables
 .env
-.env.local
+.env.*
+!.env.example
+
+# ---------------------------------------------------------------------------
+# Secrets & credentials  (Phase 1 hardening — defense in depth, paired with
+# detect-secrets pre-commit hook and GitHub push protection)
+# ---------------------------------------------------------------------------
+# Private keys / certificates
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+*.jks
+*.crt
+*.cer
+*.der
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
+*.ppk
+
+# Generic secret files
+secrets.*
+*secret*.yaml
+*secret*.yml
+*.secrets
+credentials
+credentials.*
+.netrc
+.pypirc
+.npmrc
+
+# Cloud provider credentials
+.aws/
+gcp-*.json
+*-service-account*.json
+service-account*.json
+*.gcp.json
+.azure/
+kubeconfig
+*kubeconfig*
+.kube/config
+
+# Infrastructure-as-code state & vars (Phase 4 — never commit these)
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.terraform/
+.terraform.lock.hcl
+
+# detect-secrets audit log (the baseline .secrets.baseline IS committed)
+.secrets.baseline.tmp
 
 # Output directories
 out/
