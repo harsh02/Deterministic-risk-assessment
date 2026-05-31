@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 @dataclass
@@ -21,7 +21,7 @@ class _TemporalResult:
     epss_multiplier: float
     notes: list[str]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "temporal_score": round(self.temporal_score, 2),
             "delta_from_base": round(self.delta_from_base, 2),
@@ -43,14 +43,14 @@ class _ReferenceTemporalCalculator:
         *,
         base_score: float,
         disclosure_date: datetime,
-        current_date: Optional[datetime] = None,
+        current_date: datetime | None = None,
         epss_score: float = 0.5,
         known_exploited: bool = False,
         kev_listed: bool = False,
-        last_modified: Optional[datetime] = None,
-        adoption_hint: Optional[float] = None,
-        cve_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        last_modified: datetime | None = None,
+        adoption_hint: float | None = None,
+        cve_id: str | None = None,
+    ) -> dict[str, Any]:
         now = self._normalize_datetime(current_date) or datetime.now(timezone.utc)
         disclosed = self._normalize_datetime(disclosure_date) or now
         last_touch = self._normalize_datetime(last_modified) or disclosed
@@ -91,7 +91,9 @@ class _ReferenceTemporalCalculator:
             elif adoption_boost < 0:
                 notes.append("Low adoption confidence")
 
-        temporal_score = base_score + recency_adjust + (epss_multiplier - 1.0) * 2.0 + adoption_boost
+        temporal_score = (
+            base_score + recency_adjust + (epss_multiplier - 1.0) * 2.0 + adoption_boost
+        )
         temporal_score = max(self.MIN_SCORE, min(self.MAX_SCORE, temporal_score))
         delta = temporal_score - base_score
 
@@ -113,7 +115,7 @@ class _ReferenceTemporalCalculator:
         return result.to_dict()
 
     @staticmethod
-    def _normalize_datetime(value: Optional[datetime]) -> Optional[datetime]:
+    def _normalize_datetime(value: datetime | None) -> datetime | None:
         if value is None:
             return None
         if value.tzinfo is None:

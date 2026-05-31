@@ -25,14 +25,14 @@ sources:
     kev: "data/known_exploited_vulnerabilities.json"
     attack_enterprise: "data/enterprise-attack.json"
     epss: "data/epss_scores-2025-10-02.csv.gz"
-    
+
     # Medical device-specific databases
     fda_maude: "data/fda-maude-reports.json"        # FDA adverse event reports
     fda_recalls: "data/fda-device-recalls.json"     # Medical device recalls
     emb3d: "data/emb3d-stix-2.0.1.json"            # Embedded device security
     iomt_threats: "data/iomt-threat-catalog.json"   # IoMT-specific threats
     hipaa_breaches: "data/hhs-breach-portal.json"   # Healthcare data breaches
-    
+
   vector_indices:
     cve_idx: "indexes/cve.faiss"
     kev_idx: "indexes/kev.faiss"
@@ -48,26 +48,26 @@ features:
     field: "cvss.baseScore"
     default: 0
     comment: "CVSS may underestimate patient safety impact"
-  
+
   - name: CVSS_Exploitability
     from: ["cve"]
     field: "cvss.exploitabilityScore"
     default: 0
     weight_adjustment: 0.9  # Slightly reduce (medical devices often isolated)
-  
+
   - name: KnownExploited
     from: ["kev"]
     default: 0
     weight_adjustment: 1.3  # Increase (known exploits in healthcare are critical)
-  
+
   - name: Attack_Frequency
     from: ["attack_enterprise"]
     default: 0.4
-  
+
   - name: EPSS_Score
     from: ["epss"]
     default: 0.05
-  
+
   # Medical device-specific features
   - name: Patient_Safety_Impact
     from: ["fda_maude", "fda_recalls", "iomt_threats"]
@@ -81,7 +81,7 @@ features:
       "no_injury": 0.2              # Malfunction without patient impact
       "none": 0.0
     comment: "FDA Class I recall territory if >= 0.8"
-  
+
   - name: FDA_Recall_History
     from: ["fda_recalls"]
     description: "Has this device/vulnerability caused FDA recalls?"
@@ -91,7 +91,7 @@ features:
       "class_ii": 0.6               # Temporary or reversible adverse effects
       "class_iii": 0.3              # Unlikely to cause adverse health effects
       "none": 0.0
-  
+
   - name: Device_Classification
     from: ["internal_reports"]
     description: "FDA device classification (risk level)"
@@ -102,7 +102,7 @@ features:
       "class_ii": 0.6               # Moderate risk (infusion pumps, monitors)
       "class_i": 0.3                # Low risk (tongue depressors, bandages)
     comment: "Requires internal device inventory"
-  
+
   - name: Life_Sustaining_Flag
     from: ["internal_reports", "iomt_threats"]
     description: "Is this device life-sustaining or life-supporting?"
@@ -114,7 +114,7 @@ features:
       "therapeutic": 0.4            # Important for treatment but not critical
       "diagnostic": 0.2             # Used for diagnosis only
     comment: "Highest priority devices"
-  
+
   - name: PHI_Exposure_Risk
     from: ["hipaa_breaches"]
     description: "Protected Health Information exposure risk"
@@ -125,7 +125,7 @@ features:
       "metadata_only": 0.3          # No PHI content
       "none": 0.0
     comment: "HIPAA breach notification may be required"
-  
+
   - name: Network_Connectivity
     from: ["iomt_threats"]
     description: "Device network exposure"
@@ -136,7 +136,7 @@ features:
       "medical_vlan": 0.4           # Isolated medical device VLAN
       "standalone": 0.1             # Not networked
     comment: "IoMT devices increasingly connected"
-  
+
   - name: Patch_Feasibility
     from: ["internal_reports"]
     description: "Can this device be patched without regulatory re-validation?"
@@ -148,7 +148,7 @@ features:
       "vendor_patches": 0.4         # Vendor provides patches
       "auto_updates": 0.1           # Automatic security updates
     comment: "Medical devices harder to patch than IT systems"
-  
+
   - name: Clinical_Workflow_Impact
     from: ["iomt_threats"]
     description: "Impact on clinical operations and patient care workflow"
@@ -158,14 +158,14 @@ features:
       "inpatient_care": 0.7         # General hospital wards
       "outpatient_care": 0.4        # Clinics, routine visits
       "administrative": 0.2         # Billing, scheduling
-  
+
   # Standard features with adjusted defaults
   - name: Impact_Category
     default: 0.7  # Higher default (patient safety)
-  
+
   - name: Data_Sensitivity
     default: 0.9  # PHI is highly sensitive
-  
+
   - name: Impact_Scope
     default: 0.6  # Medical devices often in critical areas
 
@@ -181,7 +181,7 @@ scoring:
       0.10*FDA_Recall_History
     clamp: [0, 1]
     comment: "Known exploits and recall history are strong signals"
-  
+
   severity:
     # Medical prioritizes: Patient Safety > PHI Protection > Availability > Integrity
     formula: |
@@ -192,25 +192,25 @@ scoring:
       0.05*Impact_Scope
     clamp: [0, 1]
     comment: "Patient safety is paramount, followed by HIPAA compliance"
-    
+
     # Multipliers for critical scenarios
     multipliers:
       - condition: "Patient_Safety_Impact >= 0.8"
         factor: 1.8
         note: "Life-threatening scenarios"
-      
+
       - condition: "Life_Sustaining_Flag == 1.0"
         factor: 2.0
         note: "Life-sustaining device failure"
-      
+
       - condition: "FDA_Recall_History == 1.0"
         factor: 1.5
         note: "Prior FDA Class I recall"
-      
+
       - condition: "PHI_Exposure_Risk >= 0.6 AND bulk_phi"
         factor: 1.4
         note: "Mass HIPAA breach risk"
-  
+
   overall_risk:
     method: "matrix"
     matrix:
@@ -243,7 +243,7 @@ context:
     "PACS": 0.7              # Picture Archiving System
     "Laboratory_Analyzer": 0.6
     "Surgical_Robot": 0.95
-  
+
   clinical_areas:
     # Hospital departments (criticality)
     "Emergency_Department": 1.0
@@ -254,7 +254,7 @@ context:
     "General_Ward": 0.6
     "Outpatient_Clinic": 0.4
     "Administrative": 0.2
-  
+
   regulatory_risk:
     # Regulatory consequences
     "fda_class_i_recall": 1.0      # Life-threatening
@@ -274,7 +274,7 @@ outputs:
       - "overall_risk in ['High', 'Critical']"
       - "KnownExploited == 1 AND Clinical_Workflow_Impact >= 0.7"
       - "Network_Connectivity == 1.0 AND CVSS_BaseScore >= 7.0"
-  
+
   report_fields:
     - "likelihood"
     - "severity"
@@ -286,23 +286,23 @@ outputs:
     - "regulatory_notes"            # FDA/HIPAA implications
     - "feature_breakdown"
     - "evidence.provenance"
-  
+
   formatting:
     style: "json_blocks"
     include_graph: true
     medical_specific_notes: true
     include_regulatory_guidance: true
-  
+
   notifications:
     # Auto-escalation paths
     - trigger: "Patient_Safety_Impact >= 0.8"
       notify: ["chief-medical-officer", "patient-safety-committee", "risk-management"]
       priority: "P0"
-    
+
     - trigger: "FDA_Recall_History == 1.0"
       notify: ["regulatory-affairs", "quality-assurance", "legal"]
       priority: "P1"
-    
+
     - trigger: "PHI_Exposure_Risk >= 0.6"
       notify: ["privacy-officer", "hipaa-compliance", "legal"]
       priority: "P1"
@@ -315,28 +315,28 @@ recommended_sources:
     format: "XML/CSV"
     update_frequency: "Monthly"
     priority: "High"
-  
+
   - name: "FDA Device Recalls"
     url: "https://www.accessdata.fda.gov/scripts/cdrh/cfdocs/cfres/res.cfm"
     description: "Medical device recall database"
     format: "XML/CSV"
     update_frequency: "Weekly"
     priority: "High"
-  
+
   - name: "HHS Breach Portal"
     url: "https://ocrportal.hhs.gov/ocr/breach/breach_report.jsf"
     description: "Healthcare data breach notifications (HIPAA)"
     format: "CSV"
     update_frequency: "Monthly"
     priority: "Medium"
-  
+
   - name: "IoMT Threat Catalog"
     url: "https://www.nist.gov/healthcare"
     description: "NIST guidance on IoMT security"
     format: "JSON"
     update_frequency: "Quarterly"
     priority: "Medium"
-  
+
   - name: "EMB3D (Embedded Security)"
     url: "https://github.com/mitre/emb3d"
     format: "STIX 2.0 JSON"
@@ -355,7 +355,7 @@ examples:
       overall_risk: "Critical"
       regulatory: "FDA Class I recall candidate, immediate patient notification required"
       reasoning: "Unauthorized dosage control = patient death risk"
-  
+
   - title: "CVE-2024-XXXXX SQL Injection in EHR System"
     description: "Unauthenticated SQL injection exposing patient records"
     device_type: "EHR_System"
@@ -366,7 +366,7 @@ examples:
       overall_risk: "Critical"
       regulatory: "HIPAA breach notification required, potential OCR investigation"
       reasoning: "Mass PHI exposure triggers mandatory reporting"
-  
+
   - title: "Unencrypted Network Traffic in Patient Monitor"
     description: "Vital signs transmitted without encryption on hospital network"
     device_type: "Patient_Monitor"

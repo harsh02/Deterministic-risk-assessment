@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -28,20 +28,20 @@ class _NullTemporalCalculator:
         *,
         base_score: float,
         disclosure_date: datetime,
-        current_date: Optional[datetime] = None,
+        current_date: datetime | None = None,
         epss_score: float = 0.5,
         known_exploited: bool = False,
         kev_listed: bool = False,
-        last_modified: Optional[datetime] = None,
-        adoption_hint: Optional[float] = None,
-        cve_id: Optional[str] = None,
-    ) -> Optional[Dict[str, Any]]:
+        last_modified: datetime | None = None,
+        adoption_hint: float | None = None,
+        cve_id: str | None = None,
+    ) -> dict[str, Any] | None:
         return None
 
 
 _NULL_CALCULATOR = _NullTemporalCalculator()
 _cached_calculator: Any = None
-_loader_status: Optional[str] = None
+_loader_status: str | None = None
 
 
 def _load_calculator() -> Any:
@@ -82,7 +82,7 @@ def temporal_plugin_ready() -> bool:
     return calc is not _NULL_CALCULATOR
 
 
-def temporal_plugin_status() -> Optional[str]:
+def temporal_plugin_status() -> str | None:
     """Return loader status for diagnostics."""
     global _loader_status
     if _loader_status is None:

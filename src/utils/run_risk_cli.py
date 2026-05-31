@@ -17,14 +17,13 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 import yaml
-
 from risk_engine import build_features, compute_scores
 
 
-def load_config(path: Path) -> Dict[str, Any]:
+def load_config(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
     # Attach config file path so relative sources resolve correctly
@@ -33,7 +32,9 @@ def load_config(path: Path) -> Dict[str, Any]:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run DetRisk risk engine on a single input payload.")
+    parser = argparse.ArgumentParser(
+        description="Run DetRisk risk engine on a single input payload."
+    )
 
     parser.add_argument(
         "--config",
@@ -48,7 +49,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--description", help="Detailed description of the threat.", default="")
 
     parser.add_argument("--cve", help="Optional CVE identifier (e.g. CVE-2023-12345).", default="")
-    parser.add_argument("--ttp", "--ttx", dest="ttx", help="Optional MITRE ATT&CK technique ID.", default="")
+    parser.add_argument(
+        "--ttp", "--ttx", dest="ttx", help="Optional MITRE ATT&CK technique ID.", default=""
+    )
 
     parser.add_argument(
         "--json-input",
@@ -59,8 +62,8 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def build_payload(args: argparse.Namespace) -> Dict[str, Any]:
-    payload: Dict[str, Any] = {}
+def build_payload(args: argparse.Namespace) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
 
     if args.json_input:
         path = Path(args.json_input)
@@ -98,15 +101,26 @@ def main() -> None:
     scores = compute_scores(cfg, features, context)
 
     print("=== Core Scores ===")
-    print(json.dumps({
-        "likelihood": scores.get("likelihood"),
-        "severity": scores.get("severity"),
-        "overall_risk": scores.get("overall_risk"),
-        "severity_mode": scores.get("severity_mode"),
-    }, indent=2))
+    print(
+        json.dumps(
+            {
+                "likelihood": scores.get("likelihood"),
+                "severity": scores.get("severity"),
+                "overall_risk": scores.get("overall_risk"),
+                "severity_mode": scores.get("severity_mode"),
+            },
+            indent=2,
+        )
+    )
 
     # Evidence overview
-    sources = sorted({ev.get("source") for ev in metadata.get("evidence", []) if isinstance(ev, dict) and ev.get("source")})
+    sources = sorted(
+        {
+            ev.get("source")
+            for ev in metadata.get("evidence", [])
+            if isinstance(ev, dict) and ev.get("source")
+        }
+    )
     print("\n=== Evidence Sources ===")
     print(json.dumps(sources, indent=2))
 

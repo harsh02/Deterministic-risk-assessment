@@ -14,7 +14,7 @@
 
 ### High-Level Flow
 ```
-Input (CVE ID or description) 
+Input (CVE ID or description)
   → Feature Extraction (Resolver Pattern)
     → Database Lookups (NVD, KEV, ATT&CK, EPSS)
     → Semantic Search Fallback (if no exact match)
@@ -34,7 +34,7 @@ Input (CVE ID or description)
   - `deterministic_features_from_dbs()` (line 1419) - Orchestrates all resolvers
   - `compute_scores()` (line 1506+) - Calculate likelihood/severity from formulas
   - `build_features()` (line 1459+) - Merge defaults + DB features + manual overrides
-  
+
 - **Resolver Pattern** (each returns `(features_dict, evidence_dict)`):
   - `resolve_from_cve()` (lines 341-507) - NVD CVE lookup, CVSS scores, semantic fallback
   - `resolve_from_kev()` - CISA KEV database (known exploited vulnerabilities)
@@ -246,12 +246,12 @@ scoring:
   likelihood:
     formula: "0.35 * Exploitability + 0.35 * KnownExploited + 0.20 * AttackFrequency + 0.10 * EPSS_Score"
     clamp: [0, 1]
-  
+
   severity:
     with_cvss_formula: "0.70 * norm(CVSS_BaseScore, 0, 10) + 0.20 * context_criticality + 0.10 * norm(Impact_Scope, 0, 1)"
     without_cvss_formula: "0.40 * norm(ImpactCategory, 0, 4) + 0.30 * DataSensitivity + 0.20 * context_criticality + 0.10 * norm(Impact_Scope, 0, 1)"
     clamp: [0, 10]
-  
+
   overall_risk:
     matrix:
       bins: [0.2, 0.4, 0.6, 0.8]
@@ -413,6 +413,6 @@ python tests/unit/test_threat.py
 
 ---
 
-**Version**: 2.0  
-**Last Updated**: January 2025  
+**Version**: 2.0
+**Last Updated**: January 2025
 **Maintainer**: DetRisk Development Team
