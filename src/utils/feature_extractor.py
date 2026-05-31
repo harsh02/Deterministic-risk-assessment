@@ -21,10 +21,10 @@ Design:
 
 from __future__ import annotations
 
-import re
 import logging
+import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import yaml
 
@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _clamp(value: float, lo: float = 0.0, hi: float = 1.0) -> float:
     return max(lo, min(hi, value))
@@ -52,6 +53,7 @@ def _interpret_label(score: float) -> str:
 # ---------------------------------------------------------------------------
 # Core class
 # ---------------------------------------------------------------------------
+
 
 class TaxonomyExtractor:
     """Data-driven feature extractor backed by ``taxonomy.yaml``.
@@ -75,8 +77,8 @@ class TaxonomyExtractor:
         """
         self._path = Path(taxonomy_path)
         self._nlp = nlp
-        self._taxonomy: Dict[str, Any] = {}
-        self._nlp_doc_cache: Dict[str, Any] = {}
+        self._taxonomy: dict[str, Any] = {}
+        self._nlp_doc_cache: dict[str, Any] = {}
         self._load()
 
     # ------------------------------------------------------------------
@@ -94,10 +96,10 @@ class TaxonomyExtractor:
         self._nlp_doc_cache.clear()
 
     @property
-    def extractor_names(self) -> List[str]:
+    def extractor_names(self) -> list[str]:
         return list(self._taxonomy.keys())
 
-    def get_section(self, name: str) -> Dict[str, Any]:
+    def get_section(self, name: str) -> dict[str, Any]:
         """Return the raw taxonomy section for *name*."""
         return self._taxonomy.get(name, {})
 
@@ -110,10 +112,10 @@ class TaxonomyExtractor:
         extractor_name: str,
         text: str,
         *,
-        cfg: Optional[Dict[str, Any]] = None,
-        input_payload: Optional[Dict[str, Any]] = None,
+        cfg: dict[str, Any] | None = None,
+        input_payload: dict[str, Any] | None = None,
         doc: Any = None,
-    ) -> Tuple[Dict[str, float], Dict[str, Any]]:
+    ) -> tuple[dict[str, float], dict[str, Any]]:
         """Run a named extractor against *text*.
 
         Args:
@@ -129,7 +131,7 @@ class TaxonomyExtractor:
             return {}, {}
 
         feature_name: str = section["feature"]
-        settings: Dict[str, Any] = section.get("settings", {})
+        settings: dict[str, Any] = section.get("settings", {})
 
         # ---- special-case: impact_category prevention short-circuit ----
         if extractor_name == "impact_category":
@@ -164,7 +166,7 @@ class TaxonomyExtractor:
         text: str,
         *,
         doc: Any = None,
-    ) -> Tuple[Optional[float], Dict[str, Any]]:
+    ) -> tuple[float | None, dict[str, Any]]:
         """Dedicated scope extractor using NLP token + numerical matching.
 
         Impact scope uses POS-aware token matching and regex number detection
@@ -181,10 +183,12 @@ class TaxonomyExtractor:
             doc = self._nlp(text.lower())
 
         max_score = 0.0
-        evidence: Dict[str, Any] = {}
+        evidence: dict[str, Any] = {}
 
         # 1. Numerical entity detection
-        numbers_pattern = r'\b(\d+)\s+(systems?|servers?|machines?|hosts?|devices?|users?|customers?)\b'
+        numbers_pattern = (
+            r"\b(\d+)\s+(systems?|servers?|machines?|hosts?|devices?|users?|customers?)\b"
+        )
         for match in re.finditer(numbers_pattern, text.lower()):
             count = int(match.group(1))
             entity_type = match.group(2)
@@ -228,18 +232,18 @@ class TaxonomyExtractor:
 
     def _extract_nlp(
         self,
-        section: Dict[str, Any],
+        section: dict[str, Any],
         text: str,
-        settings: Dict[str, Any],
+        settings: dict[str, Any],
         *,
         doc: Any = None,
-    ) -> Optional[Tuple[float, Dict[str, Any]]]:
+    ) -> tuple[float, dict[str, Any]] | None:
         threshold = settings.get("nlp_threshold", 0.65)
         if doc is None:
             doc = self._nlp(text.lower())
 
         best_sim = 0.0
-        best_name: Optional[str] = None
+        best_name: str | None = None
         best_base_score = 0.0
 
         for name, tmpl in section["nlp_templates"].items():
@@ -282,16 +286,16 @@ class TaxonomyExtractor:
 
     def _extract_keywords(
         self,
-        section: Dict[str, Any],
+        section: dict[str, Any],
         text: str,
-        settings: Dict[str, Any],
-    ) -> Optional[Tuple[float, Dict[str, Any]]]:
-        keywords: Dict[str, float] = section.get("keywords", {})
+        settings: dict[str, Any],
+    ) -> tuple[float, dict[str, Any]] | None:
+        keywords: dict[str, float] = section.get("keywords", {})
         mode = settings.get("mode", "")
         lowered = text.lower()
 
-        matched: List[str] = []
-        scores: List[float] = []
+        matched: list[str] = []
+        scores: list[float] = []
 
         for kw, score in keywords.items():
             if kw in lowered:
@@ -351,7 +355,7 @@ class TaxonomyExtractor:
                 final = _clamp(final + biz_boost)
 
         # Numerical system count (impact_scope keywords)
-        numbers_pattern = r'\b(\d+)\s+(systems?|servers?|machines?|hosts?|devices?)\b'
+        numbers_pattern = r"\b(\d+)\s+(systems?|servers?|machines?|hosts?|devices?)\b"
         num_match = re.search(numbers_pattern, lowered)
         if num_match:
             count = int(num_match.group(1))
@@ -375,11 +379,11 @@ class TaxonomyExtractor:
 
     def _check_dependency_patterns(
         self,
-        section: Dict[str, Any],
+        section: dict[str, Any],
         text: str,
         *,
         doc: Any = None,
-    ) -> Optional[Tuple[float, Dict[str, Any]]]:
+    ) -> tuple[float, dict[str, Any]] | None:
         patterns = section.get("dependency_patterns", {})
         if not patterns or self._nlp is None:
             return None
@@ -409,11 +413,11 @@ class TaxonomyExtractor:
 
     def _check_prevention(
         self,
-        section: Dict[str, Any],
+        section: dict[str, Any],
         text: str,
         *,
         doc: Any = None,
-    ) -> Optional[Tuple[float, Dict[str, Any]]]:
+    ) -> tuple[float, dict[str, Any]] | None:
         prev_patterns = section.get("prevention_patterns", [])
         threat_kws = section.get("prevention_threat_keywords", [])
         prev_score = section.get("prevention_score", 0.2)
@@ -449,7 +453,7 @@ class TaxonomyExtractor:
     # Internal: helpers
     # ------------------------------------------------------------------
 
-    def _count_to_score(self, section: Dict[str, Any], count: int) -> float:
+    def _count_to_score(self, section: dict[str, Any], count: int) -> float:
         """Map a numerical system count to a scope score using taxonomy tiers."""
         tiers = section.get("system_count_tiers", [])
         for tier in tiers:

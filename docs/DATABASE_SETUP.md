@@ -162,7 +162,7 @@ cd <project-root>/data
 # Create KEV placeholder
 echo '{"catalogVersion":"2025.10.13","vulnerabilities":[]}' > known_exploited_vulnerabilities.json
 
-# Create EMB3D placeholder  
+# Create EMB3D placeholder
 echo '{"type":"bundle","objects":[]}' > emb3d-stix-2.0.1.json
 
 # Create internal reports placeholder

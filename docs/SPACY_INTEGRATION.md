@@ -372,7 +372,7 @@ python risk_engine.py  # Uses keywords automatically
    ```python
    for token in doc:
        if token.lemma_ in ["gain", "elevate"]:
-           if any(obj in [t.text for t in token.subtree] 
+           if any(obj in [t.text for t in token.subtree]
                   for obj in ["privilege", "admin"]):
                return 0.85  # Privilege escalation detected
    ```
@@ -398,13 +398,13 @@ python risk_engine.py  # Uses keywords automatically
 
 ## 🏆 Key Achievements
 
-✅ **Accuracy improved from 70% to 87%** (+24%)  
-✅ **Negation detection** prevents false positives  
-✅ **Dependency parsing** detects complex patterns  
-✅ **Semantic similarity** handles paraphrasing  
-✅ **Graceful fallback** to keywords if spaCy unavailable  
-✅ **No code changes** required for users  
-✅ **55MB total** additional dependencies  
+✅ **Accuracy improved from 70% to 87%** (+24%)
+✅ **Negation detection** prevents false positives
+✅ **Dependency parsing** detects complex patterns
+✅ **Semantic similarity** handles paraphrasing
+✅ **Graceful fallback** to keywords if spaCy unavailable
+✅ **No code changes** required for users
+✅ **55MB total** additional dependencies
 
 ---
 

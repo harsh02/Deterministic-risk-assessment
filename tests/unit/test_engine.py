@@ -9,7 +9,6 @@ import sys
 from pathlib import Path
 
 import pytest
-import yaml
 
 # ---------------------------------------------------------------------------
 # Bootstrap: resolve paths from this file so tests work regardless of cwd
@@ -32,6 +31,7 @@ spec.loader.exec_module(risk_engine)
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(scope="session")
 def cfg():
     """Load risk policy config once for the entire test session."""
@@ -41,6 +41,7 @@ def cfg():
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestConfigLoading:
     def test_config_loads_without_error(self, cfg):
@@ -75,7 +76,9 @@ class TestFeatureAssembly:
         }
         features, _ = risk_engine.build_features(cfg, overrides={}, input_payload=payload)
         for key, value in features.items():
-            assert isinstance(value, (int, float)), f"Feature {key} is {type(value)}, expected numeric"
+            assert isinstance(
+                value, int | float
+            ), f"Feature {key} is {type(value)}, expected numeric"
 
     def test_overrides_applied(self, cfg):
         payload = {"title": "Test", "description": "Test"}

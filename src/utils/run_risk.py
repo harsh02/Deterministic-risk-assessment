@@ -12,25 +12,29 @@ Usage::
 
 import argparse
 import json
-import sys
 
-from risk_engine import load_config, build_features, compute_scores
+from risk_engine import build_features, compute_scores, load_config
+
 
 def main():
     """Parse arguments, run the risk engine, and emit structured JSON output."""
     ap = argparse.ArgumentParser(description="Run risk assessment with database evidence")
     ap.add_argument("--config", required=True, help="Path to YAML config")
-    ap.add_argument("--input", required=True, help="Path to JSON with CVE/TTX/asset + overrides + context")
-    ap.add_argument("--output", help="Path to output JSON file (optional, prints to stdout if not provided)")
+    ap.add_argument(
+        "--input", required=True, help="Path to JSON with CVE/TTX/asset + overrides + context"
+    )
+    ap.add_argument(
+        "--output", help="Path to output JSON file (optional, prints to stdout if not provided)"
+    )
     args = ap.parse_args()
 
     cfg = load_config(args.config)
-    with open(args.input, "r", encoding="utf-8") as f:
+    with open(args.input, encoding="utf-8") as f:
         payload = json.load(f)
 
     overrides = payload.get("feature_overrides", {})
     context = payload.get("context", {})
-    
+
     # Build features with DB resolution + manual overrides
     features, metadata = build_features(cfg, overrides, payload)
     scores = compute_scores(cfg, features, context)
@@ -42,7 +46,7 @@ def main():
             "description": payload.get("description"),
             "cve": payload.get("cve"),
             "ttx": payload.get("ttx"),
-            "asset": payload.get("asset")
+            "asset": payload.get("asset"),
         },
         "features": features,
         "scores": scores,
@@ -56,7 +60,7 @@ def main():
         status = metadata.get("temporal_risk_status")
         if status:
             result["temporal_risk_status"] = status
-    
+
     # Output
     output_json = json.dumps(result, indent=2)
     if args.output:
@@ -65,6 +69,7 @@ def main():
         print(f"Results written to {args.output}")
     else:
         print(output_json)
+
 
 if __name__ == "__main__":
     main()

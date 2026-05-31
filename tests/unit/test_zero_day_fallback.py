@@ -6,7 +6,7 @@ Zero-days have NO database information, so we rely on:
 2. Default values
 3. Manual overrides (if provided)
 """
-import json
+
 import importlib.util
 import sys
 from pathlib import Path
@@ -20,11 +20,11 @@ risk_engine = importlib.util.module_from_spec(spec)
 sys.modules["risk_engine"] = risk_engine
 spec.loader.exec_module(risk_engine)
 
-print("="*70)
+print("=" * 70)
 print("ZERO-DAY VULNERABILITY & THREAT FALLBACK TEST")
-print("="*70)
+print("=" * 70)
 print("\nTesting scenarios with NO database information available")
-print("="*70)
+print("=" * 70)
 
 # Load config
 _PROJECT_ROOT = _UNIT_DIR.parent.parent
@@ -35,17 +35,15 @@ test_cases = [
     {
         "name": "Zero-Day RCE (Text Only)",
         "description": "Minimal info - just discovered",
-        "input": {
-            "title": "Zero-day remote code execution in authentication service"
-        }
+        "input": {"title": "Zero-day remote code execution in authentication service"},
     },
     {
         "name": "Zero-Day with Rich Description",
         "description": "More context in description",
         "input": {
             "title": "Zero-day vulnerability allowing remote code execution",
-            "description": "Critical zero-day RCE in authentication service affecting all production servers. Allows attackers to execute arbitrary code with system privileges. Potentially affecting customer financial data and proprietary source code. Multiple systems at risk."
-        }
+            "description": "Critical zero-day RCE in authentication service affecting all production servers. Allows attackers to execute arbitrary code with system privileges. Potentially affecting customer financial data and proprietary source code. Multiple systems at risk.",
+        },
     },
     {
         "name": "Zero-Day with Estimated Severity",
@@ -53,19 +51,16 @@ test_cases = [
         "input": {
             "title": "Zero-day RCE in auth service",
             "description": "Remote code execution with system privileges",
-            "feature_overrides": {
-                "CVSS_BaseScore": 9.8,
-                "CVSS_Exploitability": 3.9
-            }
-        }
+            "feature_overrides": {"CVSS_BaseScore": 9.8, "CVSS_Exploitability": 3.9},
+        },
     },
     {
         "name": "Zero-Day Threat (Ransomware)",
         "description": "New ransomware variant",
         "input": {
             "title": "Unknown ransomware variant encrypted production systems",
-            "description": "New ransomware strain not in any database. Encrypted all servers containing customer payment data and medical records. Widespread impact across enterprise. Attackers using novel encryption."
-        }
+            "description": "New ransomware strain not in any database. Encrypted all servers containing customer payment data and medical records. Widespread impact across enterprise. Attackers using novel encryption.",
+        },
     },
     {
         "name": "Zero-Day with Attack Intel",
@@ -73,12 +68,9 @@ test_cases = [
         "input": {
             "title": "Zero-day actively exploited in the wild",
             "description": "Unknown vulnerability being actively exploited by APT group. Targeting financial institutions. Remote code execution suspected.",
-            "feature_overrides": {
-                "KnownExploited": 1,
-                "Attack_Frequency": 0.7
-            }
-        }
-    }
+            "feature_overrides": {"KnownExploited": 1, "Attack_Frequency": 0.7},
+        },
+    },
 ]
 
 for i, test in enumerate(test_cases, 1):
@@ -87,78 +79,76 @@ for i, test in enumerate(test_cases, 1):
     print(f"{'='*70}")
     print(f"Scenario: {test['description']}")
     print(f"\nInput: {test['input']['title'][:60]}...")
-    
+
     # Build features
     features, metadata = risk_engine.build_features(
-        cfg,
-        test['input'].get('feature_overrides', {}),
-        test['input']
+        cfg, test["input"].get("feature_overrides", {}), test["input"]
     )
-    
+
     # Compute scores
-    scores = risk_engine.compute_scores(cfg, features, test['input'].get('context', {}))
-    
+    scores = risk_engine.compute_scores(cfg, features, test["input"].get("context", {}))
+
     # Show results
-    print(f"\n📊 RISK ASSESSMENT:")
+    print("\n📊 RISK ASSESSMENT:")
     print(f"  Severity Mode:  {scores.get('severity_mode', 'unknown').upper()}")
     print(f"  Likelihood:     {scores['likelihood']*10:.1f}/10 ({scores['likelihood']:.3f})")
     print(f"  Severity:       {scores['severity']*10:.1f}/10 ({scores['severity']:.3f})")
     print(f"  Overall Risk:   {scores['overall_risk']}")
-    
+
     # Show data sources
-    print(f"\n🔍 DATA SOURCES:")
-    source_breakdown = metadata.get('source_map', {})
-    db_count = sum(1 for v in source_breakdown.values() if v == 'database')
-    override_count = sum(1 for v in source_breakdown.values() if v == 'manual_override')
-    default_count = sum(1 for v in source_breakdown.values() if v == 'default')
-    
+    print("\n🔍 DATA SOURCES:")
+    source_breakdown = metadata.get("source_map", {})
+    db_count = sum(1 for v in source_breakdown.values() if v == "database")
+    override_count = sum(1 for v in source_breakdown.values() if v == "manual_override")
+    default_count = sum(1 for v in source_breakdown.values() if v == "default")
+
     print(f"  Database features:  {db_count}")
     print(f"  Manual overrides:   {override_count}")
     print(f"  Default values:     {default_count}")
     print(f"  Confidence:         {metadata.get('confidence', 0)*100:.0f}%")
-    
+
     # Show what was extracted semantically
-    print(f"\n📋 SEMANTIC EXTRACTION:")
+    print("\n📋 SEMANTIC EXTRACTION:")
     extracted = []
-    if features.get('Impact_Category', 0.5) != 0.5:
+    if features.get("Impact_Category", 0.5) != 0.5:
         extracted.append(f"Impact Category: {features['Impact_Category']}")
-    if features.get('Data_Sensitivity', 0.5) != 0.5:
+    if features.get("Data_Sensitivity", 0.5) != 0.5:
         extracted.append(f"Data Sensitivity: {features['Data_Sensitivity']}")
-    if features.get('Impact_Scope', 0.5) != 0.5:
+    if features.get("Impact_Scope", 0.5) != 0.5:
         extracted.append(f"Impact Scope: {features['Impact_Scope']}")
-    
+
     if extracted:
         for item in extracted:
             print(f"  • {item}")
     else:
-        print(f"  • Using default values (no keywords matched)")
-    
+        print("  • Using default values (no keywords matched)")
+
     # Show evidence
-    if metadata.get('evidence'):
-        print(f"\n📝 EVIDENCE:")
-        for ev in metadata['evidence'][:3]:  # Show first 3
-            if ev.get('matched_keywords'):
+    if metadata.get("evidence"):
+        print("\n📝 EVIDENCE:")
+        for ev in metadata["evidence"][:3]:  # Show first 3
+            if ev.get("matched_keywords"):
                 print(f"  • Keywords: {', '.join(ev['matched_keywords'][:4])}")
-            elif ev.get('matched_category') and ev['matched_category'] != 'unknown':
+            elif ev.get("matched_category") and ev["matched_category"] != "unknown":
                 print(f"  • Category: {ev['matched_category']}")
-            elif ev.get('matched_scope') and 'default' not in ev['matched_scope']:
+            elif ev.get("matched_scope") and "default" not in ev["matched_scope"]:
                 print(f"  • Scope: {ev['matched_scope']}")
-    
+
     # Fallback status
-    print(f"\n✅ FALLBACK STATUS:")
+    print("\n✅ FALLBACK STATUS:")
     if override_count > 0:
         print(f"  ✓ Using manual overrides for {override_count} features")
     if db_count > 0:
         print(f"  ✓ Found {db_count} features from semantic extraction")
     if default_count > 0:
         print(f"  ✓ Using {default_count} default values as fallback")
-    
-    if scores['overall_risk'] in ['High', 'Critical']:
-        print(f"\n⚠️  RECOMMENDATION: Treat as HIGH PRIORITY zero-day")
+
+    if scores["overall_risk"] in ["High", "Critical"]:
+        print("\n⚠️  RECOMMENDATION: Treat as HIGH PRIORITY zero-day")
 
 print(f"\n{'='*70}")
 print("FALLBACK MECHANISM SUMMARY")
-print("="*70)
+print("=" * 70)
 print("""
 ✅ The system handles zero-days through multiple fallback layers:
 
