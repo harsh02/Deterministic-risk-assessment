@@ -1,0 +1,246 @@
+# Reusable security pipeline (the "paved road").
+#
+# Invoked by ci.yml on this repo, and consumable by any other repo via:
+#   jobs:
+#     security:
+#       uses: harsh02/Deterministic-risk-assessment/.github/workflows/security.yml@main
+#
+# Design principles (the Phase 2 learning goals):
+#   * Shift-left in CI: the same scans as the local pre-commit hooks, but here
+#     they CANNOT be bypassed with `git commit --no-verify`.
+#   * SARIF everywhere: each scanner emits SARIF -> GitHub code scanning
+#     aggregates them in one Security tab. Tools are interchangeable producers.
+#   * Least privilege: top-level default-deny; each job requests only what it
+#     needs. The GITHUB_TOKEN is not handed broad scope.
+#   * Pipeline-as-attack-surface: every third-party action is pinned to a full
+#     commit SHA (not a mutable tag), and Harden-Runner audits egress. This is
+#     the direct lesson from the tj-actions/changed-files compromise (2025).
+
+name: security
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        description: "Python version for SCA/SAST setup steps"
+        type: string
+        default: "3.11"
+
+# Default-deny. Jobs opt into the minimal scopes they require.
+permissions: {}
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # SAST 1 — Semgrep (community security rulesets + this repo's custom rules)
+  # ---------------------------------------------------------------------------
+  semgrep:
+    name: SAST (Semgrep)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write   # upload SARIF
+    container:
+      image: semgrep/semgrep:1.97.0
+    steps:
+      - name: Harden runner (audit egress)
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      # p/security-audit + p/secrets are community rulesets; .semgrep/ holds the
+      # repo's own custom rules (e.g. enforce SafeFormulaEvaluator, ban eval).
+      - name: Run Semgrep
+        run: |
+          semgrep scan \
+            --config p/security-audit \
+            --config p/secrets \
+            --config .semgrep/ \
+            --sarif --output semgrep.sarif \
+            --metrics off
+        continue-on-error: true   # don't fail the job before SARIF is uploaded
+
+      - name: Upload Semgrep SARIF
+        uses: github/codeql-action/upload-sarif@03e4368ac7daa2bd82b3e85262f3bf87ee112f57 # v3
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+
+  # ---------------------------------------------------------------------------
+  # SAST 2 — CodeQL (semantic taint/dataflow analysis)
+  # ---------------------------------------------------------------------------
+  codeql:
+    name: SAST (CodeQL)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    steps:
+      - name: Harden runner (audit egress)
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@03e4368ac7daa2bd82b3e85262f3bf87ee112f57 # v3
+        with:
+          languages: python
+          # security-extended adds more (higher-FP) security queries on top of
+          # the default high-precision set — appropriate for a learning project.
+          queries: security-extended
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@03e4368ac7daa2bd82b3e85262f3bf87ee112f57 # v3
+        with:
+          category: codeql
+
+  # ---------------------------------------------------------------------------
+  # SCA 1 — pip-audit (Python dependency CVEs)
+  # ---------------------------------------------------------------------------
+  pip-audit:
+    name: SCA (pip-audit)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Harden runner (audit egress)
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v5
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install pip-audit
+        run: python -m pip install pip-audit==2.7.3
+
+      # Audit declared dependencies. Non-zero exit on a found vuln fails the job.
+      - name: Run pip-audit
+        run: pip-audit -r requirements.txt --strict --desc
+
+  # ---------------------------------------------------------------------------
+  # SCA 2 — OSV-Scanner (multi-source, Google's OSV database)
+  # ---------------------------------------------------------------------------
+  osv-scanner:
+    name: SCA (OSV-Scanner)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Harden runner (audit egress)
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Run OSV-Scanner
+        uses: google/osv-scanner-action/osv-scanner-action@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
+        continue-on-error: true
+        with:
+          scan-args: |-
+            --output=osv.sarif
+            --format=sarif
+            ./
+
+      - name: Upload OSV SARIF
+        uses: github/codeql-action/upload-sarif@03e4368ac7daa2bd82b3e85262f3bf87ee112f57 # v3
+        with:
+          sarif_file: osv.sarif
+          category: osv-scanner
+
+  # ---------------------------------------------------------------------------
+  # Secrets — TruffleHog (verified: only reports secrets confirmed live)
+  # ---------------------------------------------------------------------------
+  secrets:
+    name: Secrets (TruffleHog)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Harden runner (audit egress)
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2
+        with:
+          egress-policy: audit
+
+      - name: Checkout (full history for diff scanning)
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Run TruffleHog
+        uses: trufflesecurity/trufflehog@9f0b97f1600cd5f51e5ecb8380087807acb790f9 # main
+        with:
+          extra_args: --results=verified,unknown
+
+  # ---------------------------------------------------------------------------
+  # Posture — OpenSSF Scorecard (automated repo security posture score)
+  # ---------------------------------------------------------------------------
+  scorecard:
+    name: Posture (Scorecard)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      id-token: write   # OIDC, lets Scorecard publish results
+    steps:
+      - name: Harden runner (audit egress)
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Run Scorecard
+        uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.4.3
+        with:
+          results_file: scorecard.sarif
+          results_format: sarif
+          publish_results: false
+
+      - name: Upload Scorecard SARIF
+        uses: github/codeql-action/upload-sarif@03e4368ac7daa2bd82b3e85262f3bf87ee112f57 # v3
+        with:
+          sarif_file: scorecard.sarif
+          category: scorecard
+
+  # ---------------------------------------------------------------------------
+  # Policy-as-code — Conftest (Rego) over the workflow files themselves.
+  # Enforces the pipeline-hardening invariants we care about (pinned actions,
+  # no broad permissions). Compliance-as-code: the rules are versioned + tested.
+  # ---------------------------------------------------------------------------
+  policy:
+    name: Policy-as-code (Conftest)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Harden runner (audit egress)
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Run Conftest on workflow files
+        run: |
+          curl -sSfL https://github.com/open-policy-agent/conftest/releases/download/v0.56.0/conftest_0.56.0_Linux_x86_64.tar.gz \
+            | tar xz conftest
+          ./conftest test --policy policy/cicd .github/workflows/security.yml .github/workflows/ci.yml

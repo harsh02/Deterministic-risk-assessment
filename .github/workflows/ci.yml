@@ -1,0 +1,40 @@
+# Caller workflow — the entry point that runs on PRs and pushes to main.
+#
+# This intentionally contains almost no logic. It delegates to the reusable
+# security pipeline (.github/workflows/security.yml), which is written with
+# `workflow_call` so other repositories can consume the exact same security
+# gates via one line:
+#
+#     uses: harsh02/Deterministic-risk-assessment/.github/workflows/security.yml@main
+#
+# Keeping the security logic in a reusable workflow (rather than inline here)
+# means the pipeline is defined once and adopted everywhere — the "security
+# golden path / paved road" pattern, instead of copy-pasted CI that drifts.
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  # Allow manual runs from the Actions tab for debugging.
+  workflow_dispatch:
+
+# Default-deny at the top level. The reusable workflow grants only the
+# specific, minimal permissions each job needs (principle of least privilege).
+permissions: {}
+
+# Cancel superseded runs on the same ref to save CI minutes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  security:
+    name: Security pipeline
+    uses: ./.github/workflows/security.yml
+    permissions:
+      contents: read          # checkout
+      security-events: write  # upload SARIF to the Security tab
+      actions: read           # CodeQL needs to read workflow run info

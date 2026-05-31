@@ -1,0 +1,79 @@
+# Custom Semgrep rules for the DetRisk codebase.
+#
+# These encode THIS repo's own security invariants — the kind of project-
+# specific policy a community ruleset can't know about. Authoring detections
+# (not just running vendor rules) is the point: it shows you can express a
+# security requirement as executable policy.
+#
+# Run locally:  semgrep scan --config .semgrep/
+
+rules:
+  # --------------------------------------------------------------------------
+  # The engine's core security promise is "no eval() — formulas are evaluated
+  # by SafeFormulaEvaluator over a whitelisted AST". This rule makes that
+  # promise enforceable: any reintroduction of dynamic code execution fails CI.
+  # --------------------------------------------------------------------------
+  - id: detrisk-no-dynamic-code-execution
+    languages: [python]
+    severity: ERROR
+    message: >
+      Dynamic code execution is forbidden in DetRisk. The risk engine evaluates
+      formulas via SafeFormulaEvaluator (whitelisted AST), specifically to avoid
+      eval/exec. Reintroducing dynamic execution breaks that security guarantee.
+    metadata:
+      category: security
+      cwe: "CWE-95: Improper Neutralization of Directives in Dynamically Evaluated Code (Eval Injection)"
+      owasp: "A03:2021 - Injection"
+      confidence: HIGH
+    patterns:
+      # Scoped to functions that execute arbitrary CODE STRINGS. __import__ is
+      # deliberately NOT included: importing a module *by name* is a different
+      # risk class (CWE-95 doesn't fit) and has legitimate uses such as the
+      # hardcoded dependency-availability probe in preflight_check.py.
+      - pattern-either:
+          - pattern: eval(...)
+          - pattern: exec(...)
+          - pattern: compile(...)
+
+  # NOTE: generic "subprocess call" detection is intentionally NOT a custom rule
+  # here. Per the Phase 1 architecture decision, bandit owns Python SAST — it
+  # already flags subprocess (B603/B607) AND honors the `# nosec` triage
+  # convention. Duplicating it in Semgrep would re-introduce the double-reporting
+  # we removed ruff's "S" rules to avoid. These custom rules deliberately cover
+  # only repo-specific invariants that bandit does NOT (eval-ban tied to
+  # SafeFormulaEvaluator, shell=True, unsafe yaml.load).
+
+  # --------------------------------------------------------------------------
+  # shell=True is the classic command-injection foot-gun; never allow it.
+  # --------------------------------------------------------------------------
+  - id: detrisk-no-shell-true
+    languages: [python]
+    severity: ERROR
+    message: >
+      subprocess called with shell=True enables shell injection if any argument
+      is attacker-influenced. Pass an argument list with shell=False instead.
+    metadata:
+      category: security
+      cwe: "CWE-78: OS Command Injection"
+      owasp: "A03:2021 - Injection"
+      confidence: HIGH
+    patterns:
+      - pattern: subprocess.$FUNC(..., shell=True, ...)
+
+  # --------------------------------------------------------------------------
+  # yaml.load without a safe Loader can instantiate arbitrary Python objects.
+  # DetRisk parses policy YAML; this must always be safe_load.
+  # --------------------------------------------------------------------------
+  - id: detrisk-unsafe-yaml-load
+    languages: [python]
+    severity: ERROR
+    message: >
+      yaml.load() without SafeLoader can execute arbitrary objects during
+      deserialization. Use yaml.safe_load() — DetRisk loads untrusted policy
+      files, so this is a real deserialization risk.
+    metadata:
+      category: security
+      cwe: "CWE-502: Deserialization of Untrusted Data"
+      confidence: HIGH
+    patterns:
+      - pattern: yaml.load($X)
