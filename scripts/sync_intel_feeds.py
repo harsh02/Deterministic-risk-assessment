@@ -40,11 +40,11 @@ import logging
 import ssl
 import sys
 import time
+from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Iterable, Optional
 from urllib.error import HTTPError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
@@ -69,6 +69,7 @@ log = logging.getLogger("detrisk.sync")
 # Data classes
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class Feed:
     """Single intelligence feed descriptor — populated from YAML."""
@@ -78,8 +79,8 @@ class Feed:
     url: str
     destination: Path
     max_bytes: int
-    decompress: str | None = None          # "zip" | "gzip" | None
-    extract_name: str | None = None        # file inside a ZIP archive
+    decompress: str | None = None  # "zip" | "gzip" | None
+    extract_name: str | None = None  # file inside a ZIP archive
     max_unpacked_bytes: int | None = None
     manual_guidance: str | None = None
 
@@ -98,6 +99,7 @@ class SyncSettings:
 # ---------------------------------------------------------------------------
 # YAML registry loader
 # ---------------------------------------------------------------------------
+
 
 def _load_registry() -> tuple[dict[str, Feed], dict, SyncSettings]:
     """Parse ``policy/feeds.yaml`` into typed objects."""
@@ -129,6 +131,7 @@ def _load_registry() -> tuple[dict[str, Feed], dict, SyncSettings]:
 # Low-level helpers
 # ---------------------------------------------------------------------------
 
+
 def _safe_domain(url: str) -> None:
     """Reject anything that isn't HTTPS."""
     parsed = urlparse(url)
@@ -145,7 +148,7 @@ def _hash_file(path: Path) -> str:
     return h.hexdigest()
 
 
-def _read_meta(meta_path: Path) -> tuple[Optional[str], Optional[str], Optional[str]]:
+def _read_meta(meta_path: Path) -> tuple[str | None, str | None, str | None]:
     """Return ``(etag, last_modified, sha256)`` from a sidecar meta file."""
     if not meta_path.exists():
         return None, None, None
@@ -180,8 +183,8 @@ def _write_meta(
 
 def _verify_existing(
     destination: Path,
-    expected_sha: Optional[str],
-) -> tuple[bool, Optional[str]]:
+    expected_sha: str | None,
+) -> tuple[bool, str | None]:
     """Check whether the file on disk matches the stored SHA-256."""
     if not destination.exists() or not expected_sha:
         return False, None
@@ -192,6 +195,7 @@ def _verify_existing(
 # ---------------------------------------------------------------------------
 # Retry wrapper
 # ---------------------------------------------------------------------------
+
 
 def _with_retry(fn, *, attempts: int = 3, backoff_base: float = 2.0):
     """Call *fn* up to *attempts* times with exponential back-off."""
@@ -220,6 +224,7 @@ def _with_retry(fn, *, attempts: int = 3, backoff_base: float = 2.0):
 # Streaming download
 # ---------------------------------------------------------------------------
 
+
 def _stream_download(
     url: str,
     tmp_path: Path,
@@ -242,10 +247,11 @@ def _stream_download(
         hdrs["If-Modified-Since"] = modified
 
     ctx = ssl.create_default_context()
-    req = Request(url, headers=hdrs)
+    req = Request(url, headers=hdrs)  # nosec B310 -- scheme restricted to https by _safe_domain() above
 
     try:
-        with urlopen(req, context=ctx, timeout=settings.request_timeout) as resp:
+        # nosec B310 -- url scheme is validated as https-only by _safe_domain(url) at the top of this function
+        with urlopen(req, context=ctx, timeout=settings.request_timeout) as resp:  # nosec B310
             resp_hdrs = {k.title(): v for k, v in resp.headers.items()}
             resp_hdrs["Status-Code"] = str(resp.getcode())
 
@@ -256,8 +262,7 @@ def _stream_download(
                     if total > max_bytes:
                         tmp_path.unlink(missing_ok=True)
                         raise RuntimeError(
-                            f"Download exceeds {max_bytes:,}-byte limit "
-                            f"at {total:,} bytes"
+                            f"Download exceeds {max_bytes:,}-byte limit " f"at {total:,} bytes"
                         )
                     fout.write(chunk)
 
@@ -275,6 +280,7 @@ def _stream_download(
 # Streaming decompression
 # ---------------------------------------------------------------------------
 
+
 def _decompress_to(feed: Feed, src: Path, dest: Path) -> None:
     """Decompress *src* → *dest* in a streaming fashion, enforcing size."""
     limit = feed.max_unpacked_bytes or feed.max_bytes
@@ -287,8 +293,7 @@ def _decompress_to(feed: Feed, src: Path, dest: Path) -> None:
                 if written > limit:
                     dest.unlink(missing_ok=True)
                     raise RuntimeError(
-                        f"{feed.name}: decompressed payload exceeds "
-                        f"{limit:,}-byte limit"
+                        f"{feed.name}: decompressed payload exceeds " f"{limit:,}-byte limit"
                     )
                 fout.write(chunk)
 
@@ -305,8 +310,7 @@ def _decompress_to(feed: Feed, src: Path, dest: Path) -> None:
                     if written > limit:
                         dest.unlink(missing_ok=True)
                         raise RuntimeError(
-                            f"{feed.name}: decompressed payload exceeds "
-                            f"{limit:,}-byte limit"
+                            f"{feed.name}: decompressed payload exceeds " f"{limit:,}-byte limit"
                         )
                     fout.write(chunk)
 
@@ -322,6 +326,7 @@ def _decompress_to(feed: Feed, src: Path, dest: Path) -> None:
 # ---------------------------------------------------------------------------
 # Per-feed sync (runs in its own thread)
 # ---------------------------------------------------------------------------
+
 
 def _sync_feed(feed: Feed, *, force: bool, settings: SyncSettings) -> bool:
     """Download / verify a single feed.  Returns True if new data landed."""
@@ -402,10 +407,9 @@ def _sync_feed(feed: Feed, *, force: bool, settings: SyncSettings) -> bool:
 # MITRE bundle check
 # ---------------------------------------------------------------------------
 
+
 def _check_mitre_bundle(mitre_cfg: dict) -> None:
-    expected = ROOT / mitre_cfg.get(
-        "expected_path", "data/enterprise-attack.json"
-    )
+    expected = ROOT / mitre_cfg.get("expected_path", "data/enterprise-attack.json")
     guidance = mitre_cfg.get(
         "guidance",
         "Download from https://github.com/mitre/cti/releases and place "
@@ -426,6 +430,7 @@ def _check_mitre_bundle(mitre_cfg: dict) -> None:
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+
 
 def _parse_args(argv: Iterable[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -469,6 +474,7 @@ def _setup_logging(verbose: bool) -> None:
 # Entry point
 # ---------------------------------------------------------------------------
 
+
 def main(argv: Iterable[str] | None = None) -> int:
     args = _parse_args(argv or sys.argv[1:])
     _setup_logging(args.verbose)
@@ -493,9 +499,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     # Filter to requested slugs
     selected = set(feeds)
     if args.only:
-        requested = {
-            s.strip().lower() for s in args.only.split(",") if s.strip()
-        }
+        requested = {s.strip().lower() for s in args.only.split(",") if s.strip()}
         unknown = requested - set(feeds)
         if unknown:
             log.error("Unknown feed slug(s): %s", ", ".join(sorted(unknown)))

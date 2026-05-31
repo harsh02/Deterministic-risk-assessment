@@ -1,0 +1,32 @@
+# Tool configuration only. Packaging is still driven by setup.py; intentionally
+# no [build-system] table here so we don't change how the package is built.
+# Added in Phase 1 to give ruff and bandit a single config home.
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+extend-exclude = ["data", "indexes", "build", "dist"]
+
+[tool.ruff.lint]
+# Code-quality rule set. Security (SAST) is deliberately owned by bandit, not
+# ruff's flake8-bandit ("S") rules, so findings aren't double-reported and we
+# have a single place to triage/suppress them.
+#   E,F = pyflakes/pycodestyle   B = flake8-bugbear (likely bugs)
+#   I   = isort (import order)   UP = pyupgrade   C4 = comprehensions
+select = ["E", "F", "B", "I", "UP", "C4"]
+ignore = [
+  "E501",  # line length handled by the formatter
+]
+
+[tool.ruff.lint.per-file-ignores]
+# These modules run as scripts from inside src/utils and intentionally set up
+# sys.path / validate the environment before importing sibling modules, so the
+# "import not at top of file" rule (E402) does not apply.
+"src/utils/risk_engine.py" = ["E402"]
+"tests/**" = ["E402"]
+
+[tool.bandit]
+# Bandit scans for Python security issues. Tests excluded (handled by pre-commit).
+exclude_dirs = ["tests", "build", "dist", ".venv", "venv"]
+# B101 assert_used is noisy outside of security-critical code paths.
+skips = ["B101"]

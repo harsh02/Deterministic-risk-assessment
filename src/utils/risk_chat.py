@@ -9,10 +9,10 @@ Supports optional manual overrides via inline key=value syntax
 (e.g., ``cvss=7.8  kev=1``) for calibration or testing.
 """
 
+import importlib.util
 import logging
 import re
-import importlib.util
-import subprocess
+import subprocess  # nosec B404 -- only used for a static cross-platform screen clear
 import sys
 
 # Load the risk_engine module
@@ -88,7 +88,7 @@ EXAMPLES = """\
 7. Mobile banking app session hijacking CVE-2024-99999 with transaction manipulation
 
 
-🏭 MANUFACTURING & INDUSTRIAL  
+🏭 MANUFACTURING & INDUSTRIAL
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 8. Unauthenticated access to SCADA control panel, production at risk
 
@@ -141,6 +141,7 @@ EXAMPLES = """\
    • TOP_20_THREATS.md - Most common threat templates
 """
 
+
 def parse_overrides(text: str):
     """Extract key=value pairs from free text and map them to feature names.
 
@@ -165,39 +166,41 @@ def parse_overrides(text: str):
             logger.debug("Skipping override %s=%s due to parse error: %s", key, v, exc)
     return overrides
 
+
 def extract_payload(text: str):
     """Extract CVE, TTX, and asset mentions from free text"""
     payload = {}
-    
+
     # Extract CVE ID (e.g., CVE-2024-12345)
     cve_match = re.search(r"\b(CVE-\d{4}-\d{4,7})\b", text, re.IGNORECASE)
     if cve_match:
         payload["cve"] = cve_match.group(1).upper()
-    
+
     # Extract MITRE ATT&CK technique (e.g., T1190, T1203.001)
     ttx_match = re.search(r"\b(T\d{4}(?:\.\d{3})?)\b", text, re.IGNORECASE)
     if ttx_match:
         payload["ttx"] = ttx_match.group(1).upper()
-    
+
     # Extract potential asset names (various patterns)
     # Pattern 1: After "in", "affecting", "on"
     asset_patterns = [
-        r'(?:in|affecting|on|for)\s+([A-Z][A-Za-z\s]+(?:device|system|server|platform|service|tool|mammography|therapy|imaging)[A-Za-z\s]*)',
+        r"(?:in|affecting|on|for)\s+([A-Z][A-Za-z\s]+(?:device|system|server|platform|service|tool|mammography|therapy|imaging)[A-Za-z\s]*)",
         r'"([^"]+)"',  # Quoted strings
-        r'asset[:\s]+([A-Za-z][A-Za-z\s]+)',  # Explicit asset mention
+        r"asset[:\s]+([A-Za-z][A-Za-z\s]+)",  # Explicit asset mention
     ]
-    
+
     for pattern in asset_patterns:
         asset_match = re.search(pattern, text, re.IGNORECASE)
         if asset_match:
             payload["asset"] = asset_match.group(1).strip()
             break
-    
+
     # Add title and description for safety keyword matching
     payload["title"] = text[:100]  # First 100 chars as title
     payload["description"] = text
-    
+
     return payload
+
 
 def score_to_band(score: float) -> tuple:
     """Convert a normalized 0–1 score to a 1–10 band with label and indicator.
@@ -206,7 +209,7 @@ def score_to_band(score: float) -> tuple:
         Tuple of (band_number, category_label, color_indicator).
     """
     band = min(10, max(1, int(score * 10) + 1))  # Convert to 1-10
-    
+
     if band >= 9:
         return (band, "Critical", "🔴")
     elif band >= 7:
@@ -218,27 +221,28 @@ def score_to_band(score: float) -> tuple:
     else:
         return (band, "Negligible", "⚪")
 
+
 def format_risk_output(scores, features, context, payload, metadata=None):
     """Format the risk assessment output nicely with full evidence chain"""
     output = []
-    
+
     # Detection summary
-    output.append("\n" + "="*70)
+    output.append("\n" + "=" * 70)
     output.append("📊 RISK ASSESSMENT RESULT")
-    output.append("="*70)
-    
+    output.append("=" * 70)
+
     # Show semantic matches first (NEW!)
     if metadata and metadata.get("evidence"):
         cve_matches = []
         ttp_matches = []
-        
+
         for evidence in metadata["evidence"]:
             if evidence.get("match_type") == "semantic":
                 if "cve_id" in evidence:
                     cve_matches.append(evidence)
                 elif "technique_id" in evidence:
                     ttp_matches.append(evidence)
-        
+
         if cve_matches:
             output.append("\n🔍 MATCHED CVEs (Semantic Search):")
             for ev in cve_matches:
@@ -248,19 +252,25 @@ def format_risk_output(scores, features, context, payload, metadata=None):
                 if ev.get("all_matches"):
                     output.append(f"     📚 Found {len(ev['all_matches'])} total matches")
                     for i, match in enumerate(ev["all_matches"][1:4], 2):  # Show top 3 more
-                        output.append(f"        {i}. {match['cve_id']} ({match['similarity']*100:.0f}%)")
-        
+                        output.append(
+                            f"        {i}. {match['cve_id']} ({match['similarity']*100:.0f}%)"
+                        )
+
         if ttp_matches:
             output.append("\n🎯 MATCHED MITRE TTPs (Semantic Search):")
             for ev in ttp_matches:
                 sim = ev.get("similarity", 0) * 100
                 output.append(f"   • {ev['technique_id']} - {ev.get('technique_name', 'Unknown')}")
-                output.append(f"     Similarity: {sim:.0f}% | Tactics: {', '.join(ev.get('tactics', []))}")
+                output.append(
+                    f"     Similarity: {sim:.0f}% | Tactics: {', '.join(ev.get('tactics', []))}"
+                )
                 if ev.get("all_matches"):
                     output.append(f"     📚 Found {len(ev['all_matches'])} total matches")
                     for i, match in enumerate(ev["all_matches"][1:4], 2):
-                        output.append(f"        {i}. {match['technique_id']} - {match['name']} ({match['similarity']*100:.0f}%)")
-    
+                        output.append(
+                            f"        {i}. {match['technique_id']} - {match['name']} ({match['similarity']*100:.0f}%)"
+                        )
+
     # Auto-detected exact matches
     if any(payload.get(k) for k in ["cve", "ttx", "asset"]):
         output.append("\n🔍 Auto-Detected (Exact Match):")
@@ -270,28 +280,24 @@ def format_risk_output(scores, features, context, payload, metadata=None):
             output.append(f"   • MITRE TTX: {payload['ttx']}")
         if payload.get("asset"):
             output.append(f"   • Asset: {payload['asset']}")
-    
+
     # Convert scores to bands
-    likelihood_band, likelihood_cat, likelihood_emoji = score_to_band(scores['likelihood'])
-    severity_band, severity_cat, severity_emoji = score_to_band(scores['severity'])
-    
+    likelihood_band, likelihood_cat, likelihood_emoji = score_to_band(scores["likelihood"])
+    severity_band, severity_cat, severity_emoji = score_to_band(scores["severity"])
+
     # Risk scores with bands (1-10 scale)
     output.append("\n📈 Risk Scores:")
-    output.append(f"   • Likelihood:     {likelihood_emoji} {likelihood_band}/10 ({likelihood_cat})")
+    output.append(
+        f"   • Likelihood:     {likelihood_emoji} {likelihood_band}/10 ({likelihood_cat})"
+    )
     output.append(f"   • Severity:       {severity_emoji} {severity_band}/10 ({severity_cat})")
-    
+
     # Overall risk with color indicator
-    risk_level = scores['overall_risk']
-    risk_emoji = {
-        "Critical": "🔴",
-        "High": "🟠", 
-        "Medium": "🟡",
-        "Low": "🟢",
-        "Negligible": "⚪"
-    }
+    risk_level = scores["overall_risk"]
+    risk_emoji = {"Critical": "🔴", "High": "🟠", "Medium": "🟡", "Low": "🟢", "Negligible": "⚪"}
     emoji = risk_emoji.get(risk_level, "⚪")
     output.append(f"   • Overall Risk:   {emoji} {risk_level} (5x5 Matrix)")
-    criticality_band = int(scores['context_criticality'] * 10)
+    criticality_band = int(scores["context_criticality"] * 10)
     output.append(f"   • Criticality:    {criticality_band}/10")
 
     if metadata and metadata.get("temporal_risk"):
@@ -318,7 +324,7 @@ def format_risk_output(scores, features, context, payload, metadata=None):
         output.append(
             f"   • Reason: {metadata['temporal_risk_status']} (requires proprietary module)"
         )
-    
+
     # Feature breakdown (1-10 scale)
     output.append("\n📋 Feature Breakdown:")
     for name, value in features.items():
@@ -327,30 +333,31 @@ def format_risk_output(scores, features, context, payload, metadata=None):
         bar_length = int((value_10 / 10.0) * 20)  # 20 char bar
         bar = "█" * bar_length + "░" * (20 - bar_length)
         output.append(f"   {name:25} [{bar}] {value_10}/10")
-    
+
     # Context
     output.append(f"\n🏢 Context: {context.get('asset_type', 'Unknown')}")
-    output.append("="*70)
-    
+    output.append("=" * 70)
+
     return "\n".join(output)
+
 
 def main():
     import os
     from pathlib import Path
-    
+
     # Try to find config file in multiple locations
     possible_paths = [
         "risk_rules.hybrid.yaml",  # Current directory
         "../policy/risk_rules.hybrid.yaml",  # Parent/policy
         "../../policy/risk_rules.hybrid.yaml",  # Two levels up/policy
     ]
-    
+
     config_path = None
     for path in possible_paths:
         if Path(path).exists():
             config_path = path
             break
-    
+
     if not config_path:
         print("❌ Error: Cannot find risk_rules.hybrid.yaml")
         print("   Searched locations:")
@@ -358,29 +365,29 @@ def main():
             print(f"   - {path}")
         print("\n💡 Please run from the correct directory or specify config path")
         return
-    
+
     try:
         cfg = load_config(config_path)
         print(f"✅ Loaded config from: {config_path}\n")
     except Exception as e:
         print(f"❌ Error loading config: {e}")
         return
-        
+
     print(BANNER)
     context = {"asset_type": "BackendService"}  # default; change per message if provided
-    
+
     assessment_history = []
-    
+
     while True:
         try:
             msg = input("\n💬 You: ").strip()
         except (EOFError, KeyboardInterrupt):
             print("\n\n👋 Goodbye!")
             break
-            
+
         if not msg:
             continue
-            
+
         # Handle commands
         if msg.lower() in {"quit", "exit", "q"}:
             print("\n👋 Goodbye!")
@@ -392,7 +399,13 @@ def main():
             print(EXAMPLES)
             continue
         elif msg.lower() == "clear":
-            subprocess.run(["clear"] if os.name != "nt" else ["cmd", "/c", "cls"], check=False)
+            # nosec B603,B607 -- fully static command (no user input, no shell);
+            # screen-clear only. "clear"/"cls" are resolved from the OS PATH by
+            # design for cross-platform terminal clearing.
+            subprocess.run(  # nosec B603 B607
+                ["clear"] if os.name != "nt" else ["cmd", "/c", "cls"],
+                check=False,
+            )
             print(BANNER)
             continue
         elif msg.lower() == "history":
@@ -402,7 +415,9 @@ def main():
                 print("\n📜 Assessment History:")
                 for i, item in enumerate(assessment_history, 1):
                     print(f"\n{i}. {item['description'][:60]}...")
-                    print(f"   Risk: {item['risk']} | Likelihood: {item['likelihood']:.2f} | Severity: {item['severity']:.2f}")
+                    print(
+                        f"   Risk: {item['risk']} | Likelihood: {item['likelihood']:.2f} | Severity: {item['severity']:.2f}"
+                    )
             continue
 
         # parse quick context
@@ -413,7 +428,7 @@ def main():
         # Extract CVE, TTX, asset from message for DB resolution
         payload = extract_payload(msg)
         payload["description"] = msg  # Add full description for NLP extractors
-        
+
         # Parse manual overrides (highest priority)
         overrides = parse_overrides(msg)
 
@@ -421,22 +436,25 @@ def main():
         try:
             features, metadata = build_features(cfg, overrides, payload)
             scores = compute_scores(cfg, features, context)
-            
+
             # Display formatted output
             print(format_risk_output(scores, features, context, payload, metadata))
-            
+
             # Save to history
-            assessment_history.append({
-                "description": msg,
-                "risk": scores["overall_risk"],
-                "likelihood": scores["likelihood"],
-                "severity": scores["severity"],
-                "context": context.copy()
-            })
-            
+            assessment_history.append(
+                {
+                    "description": msg,
+                    "risk": scores["overall_risk"],
+                    "likelihood": scores["likelihood"],
+                    "severity": scores["severity"],
+                    "context": context.copy(),
+                }
+            )
+
         except Exception as e:
             print(f"\n❌ Error processing assessment: {e}")
             print("💡 Try 'help' for usage examples or 'examples' for threat templates")
+
 
 if __name__ == "__main__":
     main()
