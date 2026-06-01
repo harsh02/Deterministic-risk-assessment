@@ -61,6 +61,18 @@ RUN groupadd --gid 1001 detrisk \
 # Copy the prebuilt venv from the builder (no pip/compilers in this stage).
 COPY --from=builder /opt/venv /opt/venv
 
+# Remove packaging/build tooling from BOTH the venv and the base image's system
+# site-packages. DetRisk never installs packages at runtime, so pip/setuptools/
+# wheel are pure attack surface here — and they carried the bulk of the Trivy
+# image findings (malicious-wheel/tar-archive CVEs in pip/wheel/jaraco.context).
+# Removing them shrinks the surface and clears those alerts at the source.
+RUN pip uninstall -y pip setuptools wheel 2>/dev/null || true; \
+    python -m pip uninstall -y pip setuptools wheel 2>/dev/null || true; \
+    find / -depth \( -name "pip*" -o -name "setuptools*" -o -name "wheel*" \
+        -o -name "pkg_resources" -o -name "_distutils_hack" \
+        -o -name "jaraco*" \) \
+        -path "*/site-packages/*" -exec rm -rf {} + 2>/dev/null || true
+
 # Copy only what the app needs at runtime (see .dockerignore for exclusions).
 WORKDIR /app
 COPY --chown=root:root src/ ./src/
