@@ -38,3 +38,6 @@ jobs:
       contents: read          # checkout
       security-events: write  # upload SARIF to the Security tab
       actions: read           # CodeQL needs to read workflow run info
+      id-token: write         # OpenSSF Scorecard (OIDC); must be granted here
+                              # because a reusable workflow cannot request a
+                              # permission its caller did not pass through.
