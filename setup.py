@@ -31,8 +31,8 @@ setup(
         "spacy>=3.7.0",
         "sentence-transformers>=2.2.0",
         "numpy>=1.24.0",
-        "requests>=2.31.0",
-        "tqdm>=4.65.0",
+        "requests>=2.34.0",  # CVE-2024-35195 / CVE-2024-47081 / CVE-2026-25645
+        "tqdm>=4.66.3",  # CVE-2024-34062
     ],
     entry_points={
         "console_scripts": [
