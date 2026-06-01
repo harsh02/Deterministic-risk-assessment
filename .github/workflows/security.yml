@@ -244,3 +244,120 @@ jobs:
           curl -sSfL https://github.com/open-policy-agent/conftest/releases/download/v0.56.0/conftest_0.56.0_Linux_x86_64.tar.gz \
             | tar xz conftest
           ./conftest test --policy policy/cicd .github/workflows/security.yml .github/workflows/ci.yml
+
+  # ---------------------------------------------------------------------------
+  # Container — build, scan, inventory (SBOM), sign, and attest the image.
+  # Phase 3 supply-chain centerpiece:
+  #   build -> Trivy scan (SARIF) -> Syft SBOM -> (on main) push to GHCR
+  #         -> SLSA build provenance attestation -> Cosign keyless signature
+  #
+  # On pull_request we BUILD + SCAN + SBOM only (nothing is published, and forks
+  # have no registry creds). On push to main we additionally push, sign, and
+  # attest — you only sign artifacts you actually intend to ship.
+  # ---------------------------------------------------------------------------
+  container:
+    name: Container (build, scan, SBOM, sign)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write         # push image to GHCR
+      security-events: write  # upload Trivy SARIF
+      id-token: write         # Cosign keyless (OIDC) + SLSA provenance
+      attestations: write     # actions/attest-build-provenance
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: ${{ github.repository }}
+    steps:
+      - name: Harden runner (audit egress)
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      # Authenticate to the registry only when we intend to publish (push to main).
+      - name: Log in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive image tags/labels
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,format=long
+            type=ref,event=branch
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      # Build+load on PRs (scan locally); build+push by digest on main.
+      - name: Build image
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          push: ${{ github.event_name == 'push' }}
+          load: ${{ github.event_name == 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: false   # provenance is attested explicitly below
+
+      # Reference the image by immutable digest after a push; by local tag on PRs.
+      - name: Resolve image ref
+        id: ref
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "image=${REGISTRY}/${IMAGE_NAME}@${{ steps.build.outputs.digest }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "image=${{ fromJSON(steps.meta.outputs.json).tags[0] }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # --- Scan the built image for OS + language CVEs -----------------------
+      - name: Trivy image scan (SARIF)
+        uses: aquasecurity/trivy-action@314ff8b43182423b84c50b1670b0e10f858f2d98 # master
+        with:
+          scan-type: image
+          image-ref: ${{ steps.ref.outputs.image }}
+          format: sarif
+          output: trivy.sarif
+          ignore-unfixed: true
+          vuln-type: os,library
+
+      - name: Upload Trivy SARIF
+        uses: github/codeql-action/upload-sarif@03e4368ac7daa2bd82b3e85262f3bf87ee112f57 # v3
+        with:
+          sarif_file: trivy.sarif
+          category: trivy
+
+      # --- Software Bill of Materials ----------------------------------------
+      - name: Generate SBOM (Syft, CycloneDX)
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          image: ${{ steps.ref.outputs.image }}
+          format: cyclonedx-json
+          output-file: sbom.cyclonedx.json
+          upload-artifact: true
+
+      # --- Provenance + signing (publish path only) --------------------------
+      - name: Install Cosign
+        if: github.event_name == 'push'
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+
+      - name: Sign image (keyless / Sigstore OIDC)
+        if: github.event_name == 'push'
+        run: cosign sign --yes "${REGISTRY}/${IMAGE_NAME}@${DIGEST}"
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+
+      - name: Attest SLSA build provenance
+        if: github.event_name == 'push'
+        uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v1
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true

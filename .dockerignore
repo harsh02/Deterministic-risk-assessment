@@ -1,0 +1,43 @@
+# Keep the build context (and thus the image + attack surface) minimal.
+# Anything not needed to RUN the app is excluded.
+
+# VCS / CI / docs
+.git
+.github
+.gitignore
+.git-blame-ignore-revs
+docs
+*.md
+CHANGELOG.md
+
+# Local tooling & caches
+.venv
+venv
+__pycache__
+*.py[cod]
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.coverage
+htmlcov
+
+# Security tooling configs (not needed at runtime)
+.pre-commit-config.yaml
+.secrets.baseline
+.semgrep
+pyproject.toml
+setup.py
+
+# Tests
+tests
+
+# Runtime-downloaded data / large artifacts (fetched separately, never baked in)
+data
+indexes
+*.model
+
+# Secrets / local env (belt-and-suspenders with .gitignore)
+.env
+.env.*
+*.pem
+*.key
