@@ -38,6 +38,9 @@ jobs:
       contents: read          # checkout
       security-events: write  # upload SARIF to the Security tab
       actions: read           # CodeQL needs to read workflow run info
-      id-token: write         # OpenSSF Scorecard (OIDC); must be granted here
-                              # because a reusable workflow cannot request a
-                              # permission its caller did not pass through.
+      id-token: write         # Scorecard + Cosign keyless + SLSA provenance (OIDC)
+      packages: write         # push container image to GHCR
+      attestations: write     # SLSA build-provenance attestation
+                              # NOTE: a reusable workflow can only use scopes its
+                              # caller passes through, so every permission any job
+                              # in security.yml needs must be granted here too.
