@@ -1,6 +1,9 @@
 # Core dependencies
 pyyaml>=6.0
-requests>=2.31.0
+# requests floor raised for OSV-flagged CVEs: CVE-2024-35195 (cert verify
+# bypass, fixed 2.32.0), CVE-2024-47081 (.netrc credential leak, fixed 2.32.4),
+# CVE-2026-25645 (insecure temp-file reuse, fixed in the 2.34.x line).
+requests>=2.34.0
 
 # NLP for semantic extraction
 spacy>=3.7.0
@@ -10,7 +13,8 @@ sentence-transformers>=2.2.0
 numpy>=1.24.0
 
 # Progress display
-tqdm>=4.65.0
+# tqdm floor raised for CVE-2024-34062 (CLI argument injection, fixed 4.66.3).
+tqdm>=4.66.3
 
 # Optional: Download spaCy model after installing
 # Run: python -m spacy download en_core_web_md
